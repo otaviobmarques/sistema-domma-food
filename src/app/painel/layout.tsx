@@ -15,7 +15,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     .from("memberships")
     .select("tenant_id, role, unit_ids, tenants(name, status, trial_ends_at)")
     .eq("user_id", user.id);
-  if (!memberships?.length) redirect("/onboarding");
+  if (!memberships?.length) {
+    const { data: admin } = await sb.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
+    redirect(admin ? "/admin" : "/onboarding");
+  }
 
   const { data: units } = await sb.from("units").select("id, name, slug, tenant_id").order("created_at");
   if (!units?.length) redirect("/onboarding");

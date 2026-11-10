@@ -2,6 +2,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { loginIdToEmail } from "@/lib/auth";
 import { Alert, Field } from "@/components/ui";
 import { AuthShell } from "@/components/auth-shell";
 
@@ -28,8 +29,8 @@ function LoginForm() {
     const redirectFor = (to: string) => `${window.location.origin}/auth/callback?next=${encodeURIComponent(to)}`;
     try {
       if (mode === "login") {
-        const { error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) throw new Error(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos." : error.message);
+        const { error } = await sb.auth.signInWithPassword({ email: loginIdToEmail(email), password });
+        if (error) throw new Error(error.message === "Invalid login credentials" ? "Usuário/e-mail ou senha incorretos." : error.message);
         router.replace(next);
         router.refresh();
       } else if (mode === "signup") {
@@ -64,7 +65,7 @@ function LoginForm() {
           {mode === "signup" && (
             <Field label="Seu nome"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></Field>
           )}
-          <Field label="E-mail"><input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></Field>
+          <Field label={mode === "login" ? "E-mail ou usuário" : "E-mail"}><input className="input" type={mode === "login" ? "text" : "email"} required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete={mode === "login" ? "username" : "email"} autoCapitalize="none" /></Field>
           {mode !== "reset" && (
             <Field label="Senha" hint={mode === "signup" ? "Mínimo de 10 caracteres." : undefined}>
               <input className="input" type="password" required minLength={mode === "signup" ? 10 : 1} value={password}

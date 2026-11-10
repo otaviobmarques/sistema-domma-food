@@ -202,3 +202,22 @@ select 'MARKETPLACES OK' as resultado;
 delete from public.tenants where id = (select tenant_id from public.units where slug = 'outra-loja');
 do $$ begin if exists (select 1 from public.units where slug = 'outra-loja') then raise exception 'FALHA exclusão tenant'; end if; end $$;
 select 'EXCLUSAO OK' as resultado;
+-- Super admin
+insert into auth.users (id, email) values ('33333333-3333-3333-3333-333333333333','admin@x.com');
+insert into public.platform_admins values ('33333333-3333-3333-3333-333333333333');
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+set request.jwt.claims = '{"aal":"aal1"}';
+do $$ declare r jsonb; t uuid; begin
+  r := public.admin_overview();
+  if (r->'totals'->>'tenants')::int < 1 then raise exception 'FALHA overview'; end if;
+  t := (r->'tenants'->0->>'id')::uuid;
+  perform public.admin_set_tenant(t, 'completo', 'active');
+end $$;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ begin
+  begin perform public.admin_overview(); raise exception 'FALHA: lojista acessou admin';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'ADMIN OK' as resultado;

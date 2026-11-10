@@ -1,24 +1,15 @@
 "use client";
 import { useEffect } from "react";
 
+// Logo Domma Food: variação do logo Domma Tecnologia (onda + pino de entrega). Arquivos em /public/brand.
 export function LogoMark({ className = "h-8 w-8", inverted = false }: { className?: string; inverted?: boolean }) {
-  // Marca própria: prato visto de cima formando um "d" + ponto de tempero.
-  return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <rect width="32" height="32" rx="9" fill={inverted ? "#fff" : "#d9262b"} />
-      <circle cx="14" cy="18" r="7.5" fill="none" stroke={inverted ? "#d9262b" : "#fff"} strokeWidth="3" />
-      <path d="M21.5 6.5v19" stroke={inverted ? "#d9262b" : "#fff"} strokeWidth="3" strokeLinecap="round" />
-      <circle cx="14" cy="18" r="2.2" fill="#fbbf24" />
-    </svg>
-  );
+  return <img src={inverted ? "/brand/domma-food-mark-white.svg" : "/brand/domma-food-icon.svg"} alt="" aria-hidden="true" className={`${className} object-contain`} />;
 }
 
-export function Logo({ dark = false }: { dark?: boolean }) {
+export function Logo({ dark = false, className = "h-9" }: { dark?: boolean; className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-2 text-lg font-extrabold tracking-tight ${dark ? "text-white" : "text-zinc-900"}`}>
-      <LogoMark inverted={dark} />
-      <span>domma <span className={dark ? "text-brand-200" : "text-brand-600"}>food</span></span>
-    </span>
+    <img src={dark ? "/brand/domma-food-logo-dark-transparent.svg" : "/brand/domma-food-logo.svg"} alt="Domma Food"
+      className={`${className} w-auto select-none`} draggable={false} />
   );
 }
 
