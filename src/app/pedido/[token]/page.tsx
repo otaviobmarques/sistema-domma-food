@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { brl, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM } from "@/lib/format";
 import { pixPayload } from "@/lib/pix";
+import { storeColor } from "@/components/store/brand";
 
 type Order = {
   number: number; status: string; type: "delivery" | "pickup" | "dine_in"; customer_name: string;
@@ -62,7 +63,7 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
     </main>
   );
 
-  const color = order.unit.primary_color || "#6d28d9";
+  const color = storeColor(order.unit.primary_color);
   const steps = ["awaiting_payment", "pending", "preparing", "ready", order.type === "delivery" ? "dispatched" : "awaiting_pickup", "completed"]
     .filter((s) => s !== "awaiting_payment" || order.payment_method === "pix");
   const at = (s: string) => order.events.filter((e) => e.status === s).at(-1)?.at;
@@ -78,38 +79,42 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
   }
 
   return (
-    <main className="mx-auto max-w-lg px-4 py-6">
+    <main className="mx-auto max-w-lg px-4 pb-10">
+      <div className="-mx-4 mb-5 rounded-b-[2rem] px-5 pb-6 pt-6 text-white shadow-lift" style={{ background: `linear-gradient(135deg, ${color}, ${color}dd 55%, #320a10)` }}>
       <header className="flex items-center gap-3">
-        <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl text-lg font-bold text-white" style={{ background: color }}>
+        <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-full border-2 border-white/70 bg-white text-xl font-black" style={{ color }}>
           {order.unit.logo_url
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={order.unit.logo_url} alt="" className="h-full w-full object-cover" />
             : order.unit.name.slice(0, 1)}
         </div>
         <div>
-          <p className="text-sm text-zinc-500">{order.unit.name}</p>
-          <h1 className="text-2xl font-bold">Pedido #{order.number}</h1>
+          <p className="text-sm text-white/80">{order.unit.name}</p>
+          <h1 className="text-2xl font-black tracking-tight">Pedido #{order.number}</h1>
         </div>
       </header>
 
-      <p className="mt-3 text-sm text-zinc-700" aria-live="polite">
-        Olá, {order.customer_name}! Status: <strong>{STATUS_LABEL[order.status] ?? order.status}</strong>
-      </p>
-      {order.scheduled_for && <p className="text-sm text-zinc-600">Agendado para {new Date(order.scheduled_for).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>}
+      <p className="mt-5 text-sm text-white/85" aria-live="polite">Olá, {order.customer_name}!</p>
+      <p className="text-2xl font-black tracking-tight">{STATUS_LABEL[order.status] ?? order.status}</p>
+      {order.scheduled_for && <p className="mt-1 text-sm text-white/85">Agendado para {new Date(order.scheduled_for).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>}
       {!cancelled && order.status !== "completed" && order.estimated_ready_at && (
-        <p className="text-sm text-zinc-600">Previsão: {order.type === "delivery" ? "chega" : "pronto"} por volta de {timeHM(order.estimated_ready_at)}</p>
+        <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+          {order.type === "delivery" ? "Chega" : "Pronto"} por volta de {timeHM(order.estimated_ready_at)}
+        </p>
       )}
+      </div>
 
       {order.pix && order.status === "awaiting_payment" && (
         <section className="card mt-4 text-center" aria-labelledby="pix-h">
-          <h2 id="pix-h" className="font-semibold">Pague com Pix para confirmar</h2>
-          <p className="text-2xl font-bold" style={{ color }}>{brl(order.total_cents)}</p>
+          <h2 id="pix-h" className="font-extrabold">Pague com Pix para confirmar</h2>
+          <p className="text-3xl font-black" style={{ color }}>{brl(order.total_cents)}</p>
           {pixCode ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              {qr && <img src={qr} alt="QR Code Pix" width={240} height={240} className="mx-auto mt-3" />}
+              {qr && <img src={qr} alt="QR Code Pix" width={240} height={240} className="mx-auto mt-4 rounded-2xl p-2 ring-1 ring-zinc-200" />}
               <textarea readOnly aria-label="Pix copia e cola" className="input mt-3 h-20 resize-none font-mono text-xs" value={pixCode} />
-              <button className="btn mt-2 w-full text-white" style={{ background: color }} onClick={copy}>
+              <button className="btn mt-3 w-full rounded-2xl py-3.5 text-white shadow-lift" style={{ background: color }} onClick={copy}>
                 {copied ? "Código copiado ✓" : "Copiar código Pix"}
               </button>
               <p className="mt-2 text-xs text-zinc-500">
@@ -124,17 +129,18 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
 
       {cancelled ? (
         <section className="card mt-4 border-red-200 bg-red-50 text-red-900">
-          <h2 className="font-semibold">Pedido cancelado</h2>
+          <h2 className="font-extrabold">Pedido cancelado</h2>
           {order.cancel_reason && <p className="text-sm">Motivo: {order.cancel_reason}</p>}
         </section>
       ) : (
-        <ol className="card mt-4 space-y-3" aria-label="Andamento do pedido">
+        <ol className="card mt-4 space-y-0" aria-label="Andamento do pedido">
           {steps.map((s, i) => {
             const done = i <= currentIdx;
             return (
-              <li key={s} className="flex items-center gap-3">
-                <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${done ? "text-white" : "bg-zinc-200 text-zinc-500"}`}
-                  style={done ? { background: color } : undefined} aria-hidden>{done ? "✓" : i + 1}</span>
+              <li key={s} className="relative flex items-center gap-3 py-2.5">
+                {i < steps.length - 1 && <span aria-hidden className="absolute left-[13px] top-9 h-[calc(100%-1.5rem)] w-0.5" style={{ background: i < currentIdx ? color : "#e4e4e7" }} />}
+                <span className={`relative grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold ${done ? "text-white" : "bg-zinc-100 text-zinc-400 ring-1 ring-zinc-200"} ${i === currentIdx ? "ring-4" : ""}`}
+                  style={done ? { background: color, ["--tw-ring-color" as string]: `${color}33` } : undefined} aria-hidden>{done ? "✓" : i + 1}</span>
                 <span className={`flex-1 text-sm ${i === currentIdx ? "font-semibold" : done ? "" : "text-zinc-400"}`}>
                   {STATUS_LABEL[s]}{i === currentIdx && <span className="sr-only"> (etapa atual)</span>}
                 </span>
@@ -146,7 +152,7 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
       )}
 
       <section className="card mt-4 text-sm">
-        <h2 className="mb-2 font-semibold">Itens</h2>
+        <h2 className="mb-2 font-extrabold">Itens</h2>
         {order.items.map((i, k) => (
           <div key={k} className="flex justify-between gap-2 py-1">
             <div>
@@ -161,7 +167,7 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
           <div className="flex justify-between"><span>Subtotal</span><span>{brl(order.subtotal_cents)}</span></div>
           {order.type === "delivery" && <div className="flex justify-between"><span>Entrega</span><span>{order.delivery_fee_cents ? brl(order.delivery_fee_cents) : "Grátis"}</span></div>}
           {order.discount_cents > 0 && <div className="flex justify-between text-green-700"><span>Desconto</span><span>− {brl(order.discount_cents)}</span></div>}
-          <div className="flex justify-between font-bold"><span>Total</span><span>{brl(order.total_cents)}</span></div>
+          <div className="flex justify-between pt-1 text-base font-black"><span>Total</span><span style={{ color }}>{brl(order.total_cents)}</span></div>
           <p className="text-xs text-zinc-500">
             {PAYMENT_LABEL[order.payment_method]} · {order.payment_status === "paid" ? "pago" : "a pagar"}
             {order.change_for_cents ? ` · troco para ${brl(order.change_for_cents)}` : ""}
@@ -171,7 +177,7 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
       </section>
 
       <div className="mt-4 grid gap-2">
-        {waLink && <a href={waLink} target="_blank" rel="noopener noreferrer" className="btn-success w-full">💬 Falar com a loja no WhatsApp</a>}
+        {waLink && <a href={waLink} target="_blank" rel="noopener noreferrer" className="btn-success w-full py-3">Falar com a loja no WhatsApp</a>}
         <Link href={`/loja/${order.unit.slug}`} className="btn-secondary w-full">Voltar ao cardápio</Link>
       </div>
     </main>

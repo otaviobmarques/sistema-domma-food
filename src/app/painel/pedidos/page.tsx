@@ -17,9 +17,9 @@ const COLUMNS: { key: string; title: string; statuses: string[]; color: string }
   { key: "pix", title: "Aguardando Pix", statuses: ["awaiting_payment"], color: "bg-amber-500" },
   { key: "new", title: "Novos", statuses: ["pending"], color: "bg-red-500" },
   { key: "prep", title: "Em preparo", statuses: ["preparing"], color: "bg-orange-500" },
-  { key: "ready", title: "Pronto", statuses: ["ready"], color: "bg-blue-500" },
-  { key: "out", title: "Em rota / Retirada", statuses: ["dispatched", "awaiting_pickup"], color: "bg-brand-600" },
-  { key: "done", title: "Concluídos hoje", statuses: ["completed"], color: "bg-green-600" },
+  { key: "ready", title: "Pronto", statuses: ["ready"], color: "bg-sky-500" },
+  { key: "out", title: "Em rota / Retirada", statuses: ["dispatched", "awaiting_pickup"], color: "bg-violet-500" },
+  { key: "done", title: "Concluídos hoje", statuses: ["completed"], color: "bg-emerald-500" },
 ];
 
 function nextAction(o: Order): { status: string; label: string } | null {
@@ -232,7 +232,7 @@ export default function PedidosPage() {
           <Toggle checked={showCancelled} onChange={setShowCancelled} label="Mostrar cancelados" /> Cancelados
         </label>
         <button className="btn-secondary" onClick={toggleMute} aria-pressed={muted}>
-          {muted ? "🔇 Som desligado" : "🔔 Som ligado"}
+          {muted ? "Som desligado" : "Som ligado"}
         </button>
         {notifPerm === "default" && (
           <button className="btn-secondary" onClick={enableNotifications}>Ativar notificações</button>
@@ -240,8 +240,8 @@ export default function PedidosPage() {
       </div>
 
       {unacked && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-600 px-4 py-3 text-white" role="alert">
-          <span className="font-semibold">Você tem pedidos novos aguardando!</span>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-gradient-to-r from-brand-600 to-brand-700 px-4 py-3 text-white shadow-lift" role="alert">
+          <span className="flex items-center gap-2 font-semibold"><span className="h-2.5 w-2.5 animate-ping rounded-full bg-white" />Você tem pedidos novos aguardando!</span>
           <button className="btn bg-white text-red-700 hover:bg-red-50" onClick={ackAll}>Silenciar alerta</button>
         </div>
       )}
@@ -252,12 +252,13 @@ export default function PedidosPage() {
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-4">
           {columns.map((col) => (
-            <section key={col.key} className="flex w-72 shrink-0 flex-col rounded-xl bg-zinc-100 p-2" aria-label={col.title}>
+            <section key={col.key} className="relative flex w-72 shrink-0 flex-col overflow-hidden rounded-2xl bg-zinc-200/45 p-2.5 pt-3.5 ring-1 ring-zinc-200/70" aria-label={col.title}>
+              <span aria-hidden className={`absolute inset-x-0 top-0 h-1 ${col.color}`} />
               <header className="mb-2 flex items-center justify-between px-1">
-                <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <h2 className="flex items-center gap-2 text-sm font-bold">
                   <span className={`h-2.5 w-2.5 rounded-full ${col.color}`} />{col.title}
                 </h2>
-                <span className="badge bg-white text-zinc-700">{col.list.length}</span>
+                <span className="badge bg-white text-zinc-700 shadow-sm">{col.list.length}</span>
               </header>
               <div className="space-y-2">
                 {col.list.length === 0 && <p className="px-1 py-4 text-center text-xs text-zinc-400">Nenhum pedido</p>}
@@ -300,11 +301,11 @@ function OrderCard({ o, now, busy, isNew, onOpen, onAction, onConfirmPix }: {
   const finished = o.status === "completed" || o.status === "cancelled";
   const { min, color } = elapsedInfo(o, now);
   return (
-    <article className={`rounded-lg border bg-white p-3 shadow-sm ${isNew ? "border-red-400 ring-2 ring-red-200" : "border-zinc-200"}`}>
+    <article className={`rounded-xl border bg-white p-3.5 shadow-soft transition hover:shadow-lift ${isNew ? "border-brand-400 ring-4 ring-brand-100" : "border-zinc-200/80"}`}>
       <button type="button" onClick={onOpen} className="block w-full text-left" aria-label={`Abrir pedido ${o.number}`}>
         <div className="flex items-start justify-between gap-2">
-          <span className="font-bold">#{o.number} · {o.customer_name.split(" ")[0]}</span>
-          <span className="font-semibold">{brl(o.total_cents)}</span>
+          <span className="font-extrabold">#{o.number} · {o.customer_name.split(" ")[0]}</span>
+          <span className="font-extrabold text-zinc-900">{brl(o.total_cents)}</span>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
           {TYPE_LABEL[o.type] ?? o.type} · {CHANNEL_LABEL[o.channel] ?? o.channel} · {timeHM(o.created_at)}
@@ -319,7 +320,7 @@ function OrderCard({ o, now, busy, isNew, onOpen, onAction, onConfirmPix }: {
           {o.order_items.slice(0, 4).map((i) => <li key={i.id}>{i.quantity}x {i.name}</li>)}
           {o.order_items.length > 4 && <li className="text-zinc-400">+ {o.order_items.length - 4} itens</li>}
         </ul>
-        {!finished && <span className={`badge mt-2 ${color}`}>⏱ {min} min</span>}
+        {!finished && <span className={`badge mt-2 tabular-nums ${color}`}>{min} min</span>}
         {o.status === "cancelled" && o.cancel_reason && <p className="mt-2 text-xs text-red-700">Motivo: {o.cancel_reason}</p>}
       </button>
       {o.status === "awaiting_payment" && (

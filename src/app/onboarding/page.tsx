@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { Alert, Field, Logo } from "@/components/ui";
+import { Alert, Field } from "@/components/ui";
+import { AuthShell } from "@/components/auth-shell";
 import { slugify } from "@/lib/format";
 
 export default function Onboarding() {
@@ -27,10 +28,13 @@ export default function Onboarding() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-brand-50 px-4">
-      <form onSubmit={submit} className="card w-full max-w-md space-y-4 p-6">
-        <Logo />
-        <h1 className="text-xl font-bold">Vamos criar sua loja</h1>
+    <AuthShell>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="mb-2">
+          <p className="text-xs font-bold uppercase tracking-widest text-brand-600">Passo final</p>
+          <h1 className="mt-1 text-3xl font-black tracking-tight">Vamos criar sua loja</h1>
+          <p className="mt-1 text-sm text-zinc-500">Leva menos de um minuto. Tudo pode ser alterado depois.</p>
+        </div>
         <Field label="Nome da loja">
           <input className="input" required minLength={2} maxLength={120} value={store} placeholder="Bella Massa Pizzaria"
             onChange={(e) => { setStore(e.target.value); if (!touched) setSlug(slugify(e.target.value)); }} />
@@ -39,16 +43,16 @@ export default function Onboarding() {
           <input className="input" maxLength={120} value={company} onChange={(e) => setCompany(e.target.value)} />
         </Field>
         <Field label="Endereço do seu cardápio" hint="Só letras minúsculas, números e hífen.">
-          <div className="flex items-center rounded-lg border border-zinc-300 bg-zinc-50 text-sm">
-            <span className="pl-3 text-zinc-500">/loja/</span>
-            <input className="w-full bg-transparent px-1 py-2 outline-none" required pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]"
+          <div className="flex items-center rounded-xl border border-zinc-200 bg-white text-sm shadow-[0_1px_2px_rgb(0_0_0/0.03)] focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-100">
+            <span className="pl-3.5 text-zinc-400">/loja/</span>
+            <input className="w-full bg-transparent px-1 py-2.5 outline-none" required pattern="[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]"
               value={slug} onChange={(e) => { setTouched(true); setSlug(slugify(e.target.value)); }} />
           </div>
         </Field>
         <Alert>{err}</Alert>
-        <button className="btn-primary w-full" disabled={busy}>{busy ? "Criando..." : "Criar loja"}</button>
+        <button className="btn-primary w-full py-3" disabled={busy}>{busy ? "Criando..." : "Criar loja"}</button>
         <p className="text-xs text-zinc-500">Criamos um item e uma área de entrega de exemplo para você testar. Pode apagar depois.</p>
       </form>
-    </main>
+    </AuthShell>
   );
 }

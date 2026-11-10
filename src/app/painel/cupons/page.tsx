@@ -66,9 +66,9 @@ export default function Cupons() {
       </div>
       <Alert>{err && !edit ? err : ""}</Alert>
       {list.length === 0 ? <Empty>Nenhum cupom ainda. Que tal um BEMVINDO10 para o primeiro pedido?</Empty> : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
+        <div className="overflow-x-auto rounded-2xl border border-zinc-200/70 bg-white shadow-soft">
           <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase text-zinc-500">
+            <thead className="bg-zinc-50/80 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               <tr><th className="p-3">Código</th><th className="p-3">Regra</th><th className="p-3">Usos</th><th className="p-3">Validade</th><th className="p-3">Ativo</th><th /></tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">

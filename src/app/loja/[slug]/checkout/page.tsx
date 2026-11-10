@@ -7,6 +7,7 @@ import { brl, formatPhone, onlyDigits, parseBRL, PAYMENT_LABEL } from "@/lib/for
 import { Alert, Field } from "@/components/ui";
 import { useCart } from "@/components/store/cart";
 import type { Store } from "@/components/store/types";
+import { storeColor } from "@/components/store/brand";
 
 type Quote = { subtotal_cents: number; delivery_fee_cents: number; discount_cents: number; total_cents: number; eta_min: number; coupon_code: string | null };
 type Address = { street: string; number: string; complement: string; neighborhood: string; city: string; reference: string };
@@ -115,7 +116,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   if (store === null) return <p className="p-8 text-center">Loja não encontrada. <Link className="text-brand-700 underline" href="/">Voltar</Link></p>;
 
   const u = store.unit;
-  const color = u.primary_color || "#6d28d9";
+  const color = storeColor(u.primary_color);
   if (cart.items.length === 0) {
     return (
       <main className="mx-auto max-w-lg p-6 text-center">
@@ -129,25 +130,25 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   const localISO = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
   return (
-    <main className="mx-auto max-w-lg px-4 pb-32 pt-4">
-      <Link href={`/loja/${slug}`} className="text-sm text-zinc-600 hover:underline">← Voltar ao cardápio</Link>
-      <h1 className="mt-2 text-2xl font-bold">Finalizar pedido</h1>
+    <main className="mx-auto max-w-lg px-4 pb-36 pt-4">
+      <Link href={`/loja/${slug}`} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 shadow-sm ring-1 ring-zinc-200 hover:text-zinc-900">← Voltar ao cardápio</Link>
+      <h1 className="mt-4 text-3xl font-black tracking-tight">Finalizar pedido</h1>
       <p className="text-sm text-zinc-500">{u.name}</p>
 
       <form onSubmit={submit} className="mt-4 space-y-4">
         {u.accepts_delivery && u.accepts_pickup && (
-          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tipo de pedido">
+          <div className="grid grid-cols-2 gap-1 rounded-2xl bg-zinc-200/60 p-1" role="radiogroup" aria-label="Tipo de pedido">
             {(["delivery", "pickup"] as const).map((t) => (
               <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => setType(t)}
-                className={`btn border py-3 ${type === t ? "text-white" : "border-zinc-300 bg-white"}`} style={type === t ? { background: color, borderColor: color } : undefined}>
-                {t === "delivery" ? "🛵 Entrega" : "🏪 Retirada"}
+                className={`btn rounded-xl py-3 ${type === t ? "text-white shadow-md" : "text-zinc-600 hover:text-zinc-900"}`} style={type === t ? { background: color } : undefined}>
+                {t === "delivery" ? "Entrega" : "Retirada"}
               </button>
             ))}
           </div>
         )}
 
         <section className="card space-y-3">
-          <h2 className="font-semibold">Seus dados</h2>
+          <h2 className="text-base font-extrabold">Seus dados</h2>
           <Field label="Nome"><input className="input" required maxLength={120} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="WhatsApp" hint="Enviaremos as atualizações do pedido.">
             <input className="input" required inputMode="tel" autoComplete="tel" placeholder="(31) 99999-9999" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} />
@@ -156,10 +157,13 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
 
         {type === "delivery" && (
           <section className="card space-y-3">
-            <h2 className="font-semibold">Endereço de entrega</h2>
+            <h2 className="text-base font-extrabold">Endereço de entrega</h2>
             {u.has_location && store.zones.some((z) => z.kind === "radius") && (
               <div>
-                <button type="button" className="btn-secondary w-full" onClick={requestLocation}>📍 Usar minha localização</button>
+                <button type="button" className="btn-secondary w-full" onClick={requestLocation}>
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11Z" /><circle cx="12" cy="10" r="2.5" /></svg>
+                  Usar minha localização
+                </button>
                 {geoMsg && <p className="mt-1 text-xs text-zinc-600" aria-live="polite">{geoMsg}</p>}
               </div>
             )}
@@ -182,7 +186,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
         {u.accepts_scheduling && (
           <section className="card space-y-3">
             <label className="flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" className="h-4 w-4 accent-brand-700" checked={schedule} disabled={!u.is_open}
+              <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={schedule} disabled={!u.is_open}
                 onChange={(e) => setSchedule(e.target.checked)} />
               Agendar para outro horário {!u.is_open && "(a loja está fechada agora)"}
             </label>
@@ -195,11 +199,11 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
         )}
 
         <section className="card space-y-3">
-          <h2 className="font-semibold">Pagamento</h2>
+          <h2 className="text-base font-extrabold">Pagamento</h2>
           <div className="grid gap-2" role="radiogroup" aria-label="Forma de pagamento">
             {u.accepted_payments.map((m) => (
-              <label key={m} className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${payment === m ? "border-2" : "border-zinc-300"}`} style={payment === m ? { borderColor: color } : undefined}>
-                <input type="radio" name="pay" className="accent-brand-700" checked={payment === m} onChange={() => setPayment(m)} />
+              <label key={m} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 text-sm font-medium transition ${payment === m ? "ring-2" : "border-zinc-200 hover:border-zinc-300"}`} style={payment === m ? { borderColor: color, ["--tw-ring-color" as string]: `${color}33`, background: `${color}08` } : undefined}>
+                <input type="radio" name="pay" className="accent-brand-600" checked={payment === m} onChange={() => setPayment(m)} />
                 {PAYMENT_LABEL[m] ?? m}
                 {m === "pix" && <span className="text-xs text-zinc-500">· QR Code na próxima tela</span>}
               </label>
@@ -216,13 +220,13 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
           <Field label="Cupom de desconto"><input className="input uppercase" maxLength={30} value={coupon} onChange={(e) => setCoupon(e.target.value.toUpperCase())} /></Field>
           <Field label="Observações do pedido"><textarea className="input" rows={2} maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
           <label className="flex items-start gap-2 text-xs text-zinc-600">
-            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-700" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
             Quero receber ofertas e novidades de {u.name} pelo WhatsApp. Posso cancelar quando quiser. Seus dados são usados apenas para o pedido e, se autorizado, para comunicações da loja (LGPD).
           </label>
         </section>
 
         <section className="card space-y-1 text-sm" aria-live="polite">
-          <h2 className="mb-2 font-semibold">Resumo</h2>
+          <h2 className="mb-2 text-base font-extrabold">Resumo</h2>
           {cart.items.map((i) => (
             <div key={i.key} className="flex justify-between gap-2 text-zinc-700">
               <span>{i.quantity}x {i.name}</span><span>{brl(i.unit_price_cents * i.quantity)}</span>
@@ -234,19 +238,19 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
               <div className="flex justify-between"><span>Subtotal</span><span>{brl(quote.subtotal_cents)}</span></div>
               {type === "delivery" && <div className="flex justify-between"><span>Entrega</span><span>{quote.delivery_fee_cents ? brl(quote.delivery_fee_cents) : "Grátis"}</span></div>}
               {quote.discount_cents > 0 && <div className="flex justify-between text-green-700"><span>Desconto {quote.coupon_code ? `(${quote.coupon_code})` : ""}</span><span>− {brl(quote.discount_cents)}</span></div>}
-              <div className="flex justify-between pt-1 text-base font-bold"><span>Total</span><span>{brl(quote.total_cents)}</span></div>
+              <div className="flex justify-between pt-2 text-lg font-black"><span>Total</span><span style={{ color }}>{brl(quote.total_cents)}</span></div>
               {quote.eta_min > 0 && <p className="pt-1 text-xs text-zinc-500">Tempo estimado: {quote.eta_min} min</p>}
             </>
           ) : (
             <p className="text-zinc-500">{quoting ? "Calculando..." : "Preencha os dados para ver o total."}</p>
           )}
-          {quoteErr && !quoting && <p className="pt-2 text-sm text-amber-700">{quoteErr}</p>}
+          {quoteErr && !quoting && <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-amber-200">{quoteErr}</p>}
         </section>
 
         <Alert>{submitErr}</Alert>
 
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white p-3">
-          <button className="btn mx-auto flex w-full max-w-lg py-3 text-base text-white" style={{ background: color }}
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200/70 bg-white/90 p-3 backdrop-blur-md sm:p-4">
+          <button className="btn mx-auto flex w-full max-w-lg rounded-2xl py-3.5 text-base text-white shadow-lift" style={{ background: color }}
             disabled={busy || !quote || !!quoteErr || quoting}>
             {busy ? "Enviando..." : quote ? `Fazer pedido · ${brl(quote.total_cents)}` : "Fazer pedido"}
           </button>

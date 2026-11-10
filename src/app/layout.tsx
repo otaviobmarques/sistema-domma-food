@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   applicationName: "Domma Food",
 };
 
-export const viewport: Viewport = { themeColor: "#6d28d9", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#d9262b", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

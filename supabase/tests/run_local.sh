@@ -6,5 +6,5 @@ cd "$(dirname "$0")/.."
 psql -v ON_ERROR_STOP=1 -q -d "$DB" -f tests/local_supabase_shim.sql
 for f in migrations/*.sql; do
   echo "→ $f"
-  grep -v -E "pg_cron|cron\.schedule" "$f" | psql -v ON_ERROR_STOP=1 -q -d "$DB"
+  grep -v -E "pg_cron|pg_net|cron\.schedule" "$f" | psql -v ON_ERROR_STOP=1 -q -d "$DB"
 done

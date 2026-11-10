@@ -31,15 +31,16 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       userId: user.id, email: user.email ?? "", tenantId: unit.tenant_id, tenantName: tenant?.name ?? "",
       role: m.role as Role, unit, units: units as PanelUnit[],
     }}>
-      <div className="min-h-screen lg:flex">
+      <div className="min-h-screen bg-cream lg:flex">
         <Sidebar />
         <div className="min-w-0 flex-1">
           {tenant?.status === "trial" && (
-            <div className="bg-brand-50 px-4 py-2 text-center text-xs text-brand-900">
-              Período de teste até {new Date(tenant.trial_ends_at).toLocaleDateString("pt-BR")}.
+            <div className="flex items-center justify-center gap-2 border-b border-amber-200/70 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">
+              <span className="badge bg-amber-200/70 text-amber-900">Teste grátis</span>
+              Aproveite todos os recursos até {new Date(tenant.trial_ends_at).toLocaleDateString("pt-BR")}.
             </div>
           )}
-          <main className="mx-auto max-w-7xl p-4 lg:p-6">{children}</main>
+          <main className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">{children}</main>
         </div>
       </div>
     </PanelProvider>

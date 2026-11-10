@@ -40,7 +40,7 @@ export function ProductModal({ product, onClose, onAdd, color }: {
     <Modal open onClose={onClose} title={product.name}>
       {product.image_url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={product.image_url} alt="" className="mb-3 h-48 w-full rounded-xl object-cover" />
+        <img src={product.image_url} alt="" className="-mx-5 -mt-1 mb-4 h-56 w-[calc(100%+2.5rem)] max-w-none object-cover sm:rounded-2xl" />
       )}
       {product.description && <p className="mb-4 text-sm text-zinc-600">{product.description}</p>}
 
@@ -50,8 +50,8 @@ export function ProductModal({ product, onClose, onAdd, color }: {
           const full = counts[g.id] >= g.max;
           return (
             <fieldset key={g.id}>
-              <legend className="flex w-full items-center justify-between rounded-lg bg-zinc-100 px-3 py-2">
-                <span className="font-semibold">{g.name}</span>
+              <legend className="flex w-full items-center justify-between rounded-xl bg-zinc-100/80 px-3.5 py-2.5">
+                <span className="font-bold">{g.name}</span>
                 <span className={`badge ${g.min > 0 ? "bg-amber-100 text-amber-800" : "bg-zinc-200 text-zinc-700"}`}>
                   {g.min > 0 ? `Obrigatório · ${counts[g.id]}/${g.max}` : `Opcional · até ${g.max}`}
                 </span>
@@ -60,19 +60,19 @@ export function ProductModal({ product, onClose, onAdd, color }: {
                 {g.options.map((o) => {
                   const q = sel[g.id]?.[o.id] ?? 0;
                   return (
-                    <div key={o.id} className="flex items-center justify-between gap-3 py-2">
+                    <div key={o.id} className="flex items-center justify-between gap-3 px-1 py-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">{o.name}</p>
                         {o.description && <p className="text-xs text-zinc-500">{o.description}</p>}
-                        {o.price_cents > 0 && <p className="text-xs text-zinc-600">+ {brl(o.price_cents)}</p>}
+                        {o.price_cents > 0 && <p className="text-xs font-semibold" style={{ color }}>+ {brl(o.price_cents)}</p>}
                       </div>
                       {single ? (
-                        <input type="radio" name={`g-${g.id}`} aria-label={o.name} className="h-5 w-5 accent-brand-700"
+                        <input type="radio" name={`g-${g.id}`} aria-label={o.name} className="h-5 w-5 accent-brand-600"
                           checked={q > 0} onChange={() => setOpt(g.id, o.id, 1, true)} />
                       ) : g.allow_repeat ? (
                         <Stepper value={q} label={o.name} onChange={(v) => setOpt(g.id, o.id, v, false)} canInc={!full} />
                       ) : (
-                        <input type="checkbox" aria-label={o.name} className="h-5 w-5 accent-brand-700"
+                        <input type="checkbox" aria-label={o.name} className="h-5 w-5 accent-brand-600"
                           checked={q > 0} disabled={!q && full} onChange={(e) => setOpt(g.id, o.id, e.target.checked ? 1 : 0, false)} />
                       )}
                     </div>
@@ -91,7 +91,7 @@ export function ProductModal({ product, onClose, onAdd, color }: {
 
       <div className="sticky bottom-0 -mx-5 -mb-5 mt-5 flex items-center gap-3 border-t border-zinc-200 bg-white p-4">
         <Stepper value={qty} label="Quantidade" min={1} onChange={setQty} canInc={qty < 99} />
-        <button className="btn flex-1 py-3 text-white" style={{ background: color }} disabled={!!missing} onClick={add}>
+        <button className="btn flex-1 rounded-2xl py-3.5 text-white shadow-lift" style={{ background: color }} disabled={!!missing} onClick={add}>
           {missing ? `Escolha ${g2(missing.name)}` : `Adicionar · ${brl(unitPrice * qty)}`}
         </button>
       </div>
@@ -105,7 +105,7 @@ export function Stepper({ value, onChange, label, min = 0, canInc = true }: {
   value: number; onChange: (v: number) => void; label: string; min?: number; canInc?: boolean;
 }) {
   return (
-    <div className="inline-flex items-center rounded-lg border border-zinc-300" role="group" aria-label={label}>
+    <div className="inline-flex items-center rounded-xl border border-zinc-200 bg-white shadow-sm" role="group" aria-label={label}>
       <button type="button" className="px-3 py-1.5 text-lg disabled:opacity-30" aria-label={`Diminuir ${label}`}
         disabled={value <= min} onClick={() => onChange(value - 1)}>−</button>
       <span className="w-6 text-center text-sm font-semibold" aria-live="polite">{value}</span>

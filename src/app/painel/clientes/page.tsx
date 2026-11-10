@@ -24,7 +24,7 @@ function segment(c: Customer) {
   if (days > 30) return { label: "Em risco", cls: "bg-amber-100 text-amber-800" };
   if (c.orders_count >= 5) return { label: "Fiel", cls: "bg-green-100 text-green-800" };
   if (c.orders_count === 1) return { label: "Novo", cls: "bg-brand-100 text-brand-800" };
-  return { label: "Recorrente", cls: "bg-sky-100 text-sky-800" };
+  return { label: "Recorrente", cls: "bg-sky-50 text-sky-800" };
 }
 
 export default function Clientes() {
@@ -81,9 +81,9 @@ export default function Clientes() {
       </div>
       <Alert>{err}</Alert>
       {filtered.length === 0 ? <Empty>Os clientes aparecem aqui automaticamente a cada pedido.</Empty> : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
+        <div className="overflow-x-auto rounded-2xl border border-zinc-200/70 bg-white shadow-soft">
           <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase text-zinc-500">
+            <thead className="bg-zinc-50/80 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               <tr><th className="p-3">Cliente</th><th className="p-3">Segmento</th><th className="p-3">Pedidos</th><th className="p-3">Total gasto</th><th className="p-3">Ticket médio</th><th className="p-3">Último pedido</th><th className="p-3">Marketing</th><th /></tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">

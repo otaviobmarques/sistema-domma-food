@@ -1,9 +1,9 @@
 "use client";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { Alert, Field, Logo } from "@/components/ui";
+import { Alert, Field } from "@/components/ui";
+import { AuthShell } from "@/components/auth-shell";
 
 function safeNext(n: string | null) {
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/painel";
@@ -51,13 +51,16 @@ function LoginForm() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-brand-50 px-4">
-      <div className="w-full max-w-sm">
-        <Link href="/" className="mb-6 flex justify-center"><Logo /></Link>
-        <form onSubmit={submit} className="card space-y-4 p-6">
-          <h1 className="text-xl font-bold">
-            {mode === "login" ? "Entrar no painel" : mode === "signup" ? "Criar conta grátis" : "Recuperar senha"}
-          </h1>
+    <AuthShell>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="mb-2">
+            <h1 className="text-3xl font-black tracking-tight">
+              {mode === "login" ? "Bem-vindo de volta" : mode === "signup" ? "Crie sua loja grátis" : "Recuperar senha"}
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              {mode === "login" ? "Entre para acessar o painel da sua loja." : mode === "signup" ? "14 dias grátis, sem cartão de crédito." : "Enviaremos um link para criar uma nova senha."}
+            </p>
+          </div>
           {mode === "signup" && (
             <Field label="Seu nome"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></Field>
           )}
@@ -70,22 +73,21 @@ function LoginForm() {
           )}
           <Alert>{err}</Alert>
           <Alert kind="success">{msg}</Alert>
-          <button className="btn-primary w-full" disabled={busy}>
+          <button className="btn-primary w-full py-3" disabled={busy}>
             {busy ? "Aguarde..." : mode === "login" ? "Entrar" : mode === "signup" ? "Criar conta" : "Enviar link"}
           </button>
-          <div className="flex justify-between text-sm">
+          <div className="flex justify-between pt-1 text-sm">
             {mode === "login" ? (
               <>
-                <button type="button" className="text-brand-700 hover:underline" onClick={() => setMode("signup")}>Criar conta</button>
+                <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => setMode("signup")}>Criar conta</button>
                 <button type="button" className="text-zinc-500 hover:underline" onClick={() => setMode("reset")}>Esqueci a senha</button>
               </>
             ) : (
-              <button type="button" className="text-brand-700 hover:underline" onClick={() => setMode("login")}>Já tenho conta</button>
+              <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => setMode("login")}>Já tenho conta</button>
             )}
           </div>
         </form>
-      </div>
-    </main>
+    </AuthShell>
   );
 }
 
