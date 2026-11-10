@@ -198,3 +198,7 @@ do $$ begin
 end $$;
 reset role;
 select 'MARKETPLACES OK' as resultado;
+-- Exclusão completa de um tenant (encerramento de conta) funciona
+delete from public.tenants where id = (select tenant_id from public.units where slug = 'outra-loja');
+do $$ begin if exists (select 1 from public.units where slug = 'outra-loja') then raise exception 'FALHA exclusão tenant'; end if; end $$;
+select 'EXCLUSAO OK' as resultado;

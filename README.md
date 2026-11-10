@@ -14,6 +14,7 @@ Base técnica: **Next.js 16 (App Router) + Supabase (Postgres 17, Auth, Realtime
 | Cardápio | Categorias com horário/dias, produtos com foto, promoção, esgotar até o fim do dia, tags, dados fiscais (NCM, CFOP, CSOSN, CEST), grupos de complementos reutilizáveis |
 | Entregas | Áreas por raio (km) ou por bairro, taxa, tempo, pedido mínimo e frete grátis acima de um valor |
 | Marketing | Cupons (%, valor fixo, frete grátis; mínimo, 1º pedido, limite total e por cliente, validade); CRM com segmentos e opt-in de marketing |
+| Marketplaces | 99Food, Keeta e aiqfome via padrão **Open Delivery**: pedidos entram no gestor com o selo do canal e o status volta automaticamente (ver `docs/INTEGRACOES.md`) |
 | Gestão | Dashboard (faturamento, pedidos, ticket médio, preparo médio, por hora/dia/pagamento/tipo, mais vendidos), configurações de horário, pagamentos e loja |
 
 Próximas fases (ver `docs/ROADMAP.md`): PDV/caixa, mesas e QR na mesa, KDS, IA no WhatsApp (Domma Chat), fidelidade/cashback, estoque, financeiro, NFC-e, iFood, app do entregador.
@@ -38,6 +39,7 @@ npm run test:db     # migrações + regras de negócio + RLS num Postgres local
 
 ```
 supabase/migrations/   esquema, RLS, regras de negócio (RPCs), endurecimento
+supabase/functions/    Edge Function da integração Open Delivery
 supabase/tests/        testes do banco (isolamento entre tenants, preços, 2FA)
 src/app/loja/          cardápio público e checkout
 src/app/pedido/        acompanhamento do pedido
@@ -46,4 +48,4 @@ src/lib/               clientes Supabase, Pix (BR Code), formatação
 docs/                  arquitetura, segurança, backup e recuperação
 ```
 
-Leia `docs/SEGURANCA.md` e `docs/BACKUP_E_RECUPERACAO.md` antes de ir para produção.
+Leia `docs/SEGURANCA.md`, `docs/INTEGRACOES.md` e `docs/BACKUP_E_RECUPERACAO.md` antes de ir para produção.

@@ -8,10 +8,8 @@ import {
 } from "@/lib/format";
 import { printTicket } from "./ticket";
 import type { Order } from "./types";
+import { ChannelBadge, channelLabel, isMarketplace } from "@/components/channel-badge";
 
-const CHANNEL_LABEL: Record<string, string> = {
-  web: "Cardápio", whatsapp: "WhatsApp", ifood: "iFood", counter: "Balcão", table: "Mesa", totem: "Totem", phone: "Telefone",
-};
 
 const COLUMNS: { key: string; title: string; statuses: string[]; color: string }[] = [
   { key: "pix", title: "Aguardando Pix", statuses: ["awaiting_payment"], color: "bg-amber-500" },
@@ -304,11 +302,14 @@ function OrderCard({ o, now, busy, isNew, onOpen, onAction, onConfirmPix }: {
     <article className={`rounded-xl border bg-white p-3.5 shadow-soft transition hover:shadow-lift ${isNew ? "border-brand-400 ring-4 ring-brand-100" : "border-zinc-200/80"}`}>
       <button type="button" onClick={onOpen} className="block w-full text-left" aria-label={`Abrir pedido ${o.number}`}>
         <div className="flex items-start justify-between gap-2">
-          <span className="font-extrabold">#{o.number} · {o.customer_name.split(" ")[0]}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <ChannelBadge channel={o.channel} />
+            <span className="truncate font-extrabold">#{o.number} · {o.customer_name.split(" ")[0]}</span>
+          </span>
           <span className="font-extrabold text-zinc-900">{brl(o.total_cents)}</span>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
-          {TYPE_LABEL[o.type] ?? o.type} · {CHANNEL_LABEL[o.channel] ?? o.channel} · {timeHM(o.created_at)}
+          {TYPE_LABEL[o.type] ?? o.type}{isMarketplace(o.channel) && o.external_display_id ? ` · nº ${o.external_display_id} no ${channelLabel(o.channel)}` : ""} · {timeHM(o.created_at)}
           {o.scheduled_for && <> · <b className="text-brand-700">Agendado {new Date(o.scheduled_for).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</b></>}
         </p>
         <p className="mt-1 text-xs text-zinc-600">
@@ -322,6 +323,11 @@ function OrderCard({ o, now, busy, isNew, onOpen, onAction, onConfirmPix }: {
         </ul>
         {!finished && <span className={`badge mt-2 tabular-nums ${color}`}>{min} min</span>}
         {o.status === "cancelled" && o.cancel_reason && <p className="mt-2 text-xs text-red-700">Motivo: {o.cancel_reason}</p>}
+        {o.marketplace_cancel_requested && (
+          <p className="mt-2 rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-800 ring-1 ring-red-200">
+            {channelLabel(o.channel)} pediu o cancelamento. Abra o pedido para responder.
+          </p>
+        )}
       </button>
       {o.status === "awaiting_payment" && (
         <button className="btn-success mt-2 w-full" disabled={busy} onClick={onConfirmPix}>Confirmar Pix</button>
@@ -386,7 +392,11 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
               {formatPhone(o.customer_phone)} · <a className="text-green-700 hover:underline" href={wa} target="_blank" rel="noopener noreferrer">WhatsApp ↗</a>
             </p>
           </div>
-          <p><span className="text-zinc-500">Tipo:</span> {TYPE_LABEL[o.type] ?? o.type} · {CHANNEL_LABEL[o.channel] ?? o.channel}</p>
+          <p className="flex flex-wrap items-center gap-2"><span className="text-zinc-500">Origem:</span> <ChannelBadge channel={o.channel} size="md" />
+            {o.channel === "web" && <span>Cardápio próprio</span>}
+            {o.external_display_id && <span className="text-zinc-600">nº {o.external_display_id}</span>}
+            <span className="text-zinc-500">· {TYPE_LABEL[o.type] ?? o.type}</span></p>
+          {o.marketplace_cancel_requested && <MarketplaceCancel o={o} />}
           {o.scheduled_for && <p className="font-semibold text-brand-700">Agendado para {new Date(o.scheduled_for).toLocaleString("pt-BR")}</p>}
           {a && (
             <div className="rounded-lg bg-zinc-50 p-2">
@@ -457,5 +467,27 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
         </div>
       )}
     </Modal>
+  );
+}
+
+function MarketplaceCancel({ o }: { o: Order }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function respond(accept: boolean) {
+    setBusy(true); setErr("");
+    const { error } = await supabaseBrowser().rpc("respond_marketplace_cancellation", { p_order_id: o.id, p_accept: accept });
+    setBusy(false);
+    if (error) setErr(errorMessage(error));
+  }
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+      <p className="font-semibold text-red-900">{channelLabel(o.channel)} pediu o cancelamento deste pedido.</p>
+      <p className="mt-0.5 text-xs text-red-800">Se o pedido ainda não foi preparado, aceite. Se já está pronto ou saiu, recuse.</p>
+      <div className="mt-2 flex gap-2">
+        <button className="btn-danger" disabled={busy} onClick={() => respond(true)}>Aceitar cancelamento</button>
+        <button className="btn-secondary" disabled={busy} onClick={() => respond(false)}>Recusar</button>
+      </div>
+      {err && <p className="mt-2 text-xs text-red-700">{err}</p>}
+    </div>
   );
 }
