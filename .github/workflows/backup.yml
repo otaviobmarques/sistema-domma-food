@@ -1,0 +1,67 @@
+# Backup lógico diário, CRIPTOGRAFADO, fora do Supabase (redundância).
+# O Supabase já faz backup físico diário; este é a cópia independente.
+# Secrets necessários (Settings → Secrets and variables → Actions):
+#   SUPABASE_DB_URL     → connection string do Session Pooler (com senha)
+#   BACKUP_PASSPHRASE   → frase longa e aleatória (guarde num cofre: sem ela não há restauração)
+# Opcional (cópia em bucket S3/R2/B2):
+#   BACKUP_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION, BACKUP_S3_ENDPOINT
+name: Backup do banco
+on:
+  schedule:
+    - cron: "17 6 * * *"   # 03:17 em Brasília
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+    steps:
+      - name: Verifica secrets
+        env:
+          DB: ${{ secrets.SUPABASE_DB_URL }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$DB" ] || [ -z "$PASS" ]; then
+            echo "::error::Configure SUPABASE_DB_URL e BACKUP_PASSPHRASE nos secrets do repositório."; exit 1; fi
+      - name: Instala pg_dump 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+      - name: Dump + criptografia (AES-256)
+        env:
+          DB: ${{ secrets.SUPABASE_DB_URL }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          /usr/lib/postgresql/17/bin/pg_dump "$DB" --format=custom --no-owner --no-privileges \
+            --schema=public --schema=private --schema=auth --schema=storage \
+            --file=db.dump
+          /usr/lib/postgresql/17/bin/pg_restore --list db.dump > /dev/null   # valida o arquivo
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$PASS" \
+              --symmetric --cipher-algo AES256 -o "domma-food-$STAMP.dump.gpg" db.dump
+          shred -u db.dump
+          ls -lh domma-food-*.gpg
+      - name: Guarda no GitHub (30 dias)
+        uses: actions/upload-artifact@v4
+        with:
+          name: domma-food-db-${{ env.STAMP }}
+          path: domma-food-*.dump.gpg
+          retention-days: 30
+      - name: Cópia em bucket externo (opcional)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+        if: env.BUCKET != ''
+        run: |
+          aws s3 cp domma-food-*.dump.gpg "s3://$BUCKET/domma-food/" ${ENDPOINT:+--endpoint-url "$ENDPOINT"}

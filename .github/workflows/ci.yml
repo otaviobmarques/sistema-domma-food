@@ -1,0 +1,48 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://kcwidutqdqbyphrjnlef.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_kdh6RaaQsW-V51zMkFrCgQ_l9GNRBia
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Auditoria de dependências
+        run: npm audit --omit=dev --audit-level=high
+
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migrações + testes de regra de negócio, RLS e isolamento entre tenants
+        run: |
+          createdb dftest
+          bash supabase/tests/run_local.sh dftest
+          psql -v ON_ERROR_STOP=1 -d dftest -f supabase/tests/functional_test.sql | tee out.txt
+          grep -q "TODOS OS TESTES PASSARAM" out.txt
+          grep -q "2FA OK" out.txt
