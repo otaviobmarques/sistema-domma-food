@@ -67,8 +67,8 @@ const STEPS = [
 ];
 
 const PLANS = [
-  { name: "Essencial", price: "149", for: "Para quem está começando no delivery", items: ["Cardápio digital próprio", "Gestor de pedidos em tempo real", "Pix automático (QR Code)", "Cupons de desconto", "Dashboard"], hl: false, soon: "" },
-  { name: "Delivery", price: "229", for: "Operação focada em entrega", items: ["Tudo do Essencial", "Áreas de entrega por raio e bairro", "Clientes e CRM", "Integração 99Food, Keeta e aiqfome", "Relatórios por canal"], hl: false, soon: "" },
+  { name: "Essencial", price: "149", for: "Para quem está começando no delivery", items: ["Cardápio digital próprio", "Gestor de pedidos em tempo real", "Pix com QR Code na hora", "Cupons de desconto", "Dashboard"], hl: false, soon: "" },
+  { name: "Delivery", price: "229", for: "Operação focada em entrega", items: ["Tudo do Essencial", "Áreas de entrega por raio e bairro", "Clientes e CRM", "Integração 99Food, Keeta e aiqfome", "Relatórios de vendas"], hl: false, soon: "" },
   { name: "Completo", price: "389", for: "Operação completa e redes", items: ["Tudo do Delivery", "Até 3 lojas", "Auditoria e 2FA para a equipe", "Prioridade no suporte", "Novos módulos sem custo extra"], hl: true, soon: "" },
   { name: "Salão", price: "229", for: "Restaurante com mesas", items: ["Tudo do Essencial", "Mesas e comandas", "App do garçom", "QR Code na mesa", "KDS (monitor de cozinha)"], hl: false, soon: "Módulos de salão em breve" },
 ];
@@ -102,7 +102,7 @@ export default function Home() {
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white ring-1 ring-white/20 backdrop-blur">
               <span className="h-2 w-2 animate-pulse-ring rounded-full bg-red-brand" /> 0% de comissão no seu cardápio próprio
             </span>
-            <h1 className="mt-6 text-[2.6rem] font-black leading-[1.02] tracking-tight sm:text-6xl lg:text-[4.2rem]">
+            <h1 className="mt-6 text-[2.6rem] font-black leading-[1.02] tracking-tight sm:text-6xl lg:text-[3.8rem]">
               Venda mais.<br />
               <span className="bg-gradient-to-r from-amber-300 via-orange-300 to-white bg-clip-text text-transparent">Pague menos taxa.</span>
             </h1>
@@ -260,12 +260,12 @@ export default function Home() {
               e o status volta sozinho para o marketplace.
             </p>
             <div className="mt-8 grid gap-3 sm:grid-cols-2">
-              {[["99Food", "Ativo", "bg-yellow-300 text-zinc-900"], ["Keeta", "Ativo", "bg-zinc-900 text-yellow-300"], ["aiqfome", "Ativo", "bg-purple-700 text-white"],
-                ["Pix automático", "Ativo", "bg-emerald-600 text-white"], ["WhatsApp com IA", "Em breve", "bg-green-600 text-white"], ["Pixel Meta e Google", "Em breve", "bg-sky-700 text-white"]]
+              {[["99Food", "Pronto", "bg-yellow-300 text-zinc-900"], ["Keeta", "Pronto", "bg-zinc-900 text-yellow-300"], ["aiqfome", "Pronto", "bg-purple-700 text-white"],
+                ["Pix com QR Code", "Pronto", "bg-emerald-600 text-white"], ["WhatsApp com IA", "Em breve", "bg-green-600 text-white"], ["Pixel Meta e Google", "Em breve", "bg-sky-700 text-white"]]
                 .map(([n, s, c]) => (
                   <div key={n} className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-soft ring-1 ring-zinc-100 transition hover:-translate-y-0.5 hover:shadow-lift">
                     <span className={`rounded-full px-3 py-1 text-sm font-extrabold ${c}`}>{n}</span>
-                    <span className={`text-xs font-bold ${s === "Ativo" ? "text-emerald-700" : "text-zinc-500"}`}>{s}</span>
+                    <span className={`text-xs font-bold ${s === "Pronto" ? "text-emerald-700" : "text-zinc-500"}`}>{s}</span>
                   </div>
                 ))}
             </div>
@@ -364,13 +364,13 @@ export default function Home() {
       </section>
 
       {/* CTA FINAL */}
-      <section className="relative isolate overflow-hidden bg-red-brand py-20 text-white sm:py-24">
-        <div aria-hidden="true" className="absolute inset-0 -z-10 grid grid-cols-3 opacity-25 sm:grid-cols-6">
+      <section className="relative isolate overflow-hidden bg-navy-900 py-20 text-white sm:py-24">
+        <div aria-hidden="true" className="absolute inset-0 -z-10 grid grid-cols-3 grid-rows-2 sm:grid-cols-6 sm:grid-rows-1">
           {["pizza", "burger", "acai", "combo", "margherita", "batata"].map((f) => (
             <img key={f} src={`/marketing/food-${f}.webp`} alt="" width={418} height={231} loading="lazy" className="h-full w-full object-cover" />
           ))}
         </div>
-        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-r from-red-brand via-red-brand/90 to-navy-900/90" />
+        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-r from-red-brand/95 via-red-brand/85 to-navy-900/90" />
         <div className="mx-auto max-w-4xl px-4 text-center sm:px-6" data-reveal="zoom">
           <img src="/brand/domma-food-mark-white.svg" alt="" className="mx-auto h-16 w-auto" width={130} height={84} />
           <h2 className="mt-6 text-3xl font-black tracking-tight sm:text-5xl">Sua loja on-line hoje, seu primeiro pedido ainda hoje</h2>
