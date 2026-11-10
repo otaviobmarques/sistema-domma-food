@@ -20,6 +20,7 @@ function LoginForm() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
   const next = safeNext(params.get("next"));
 
   async function submit(e: React.FormEvent) {
@@ -53,9 +54,19 @@ function LoginForm() {
 
   return (
     <AuthShell>
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit}>
+          {mode !== "reset" && (
+            <div className="relative mb-6 grid grid-cols-2 rounded-2xl bg-zinc-100 p-1 text-sm font-bold" role="tablist">
+              <span aria-hidden="true" className={`absolute inset-y-1 w-[calc(50%-4px)] rounded-xl bg-white shadow-sm transition-transform duration-300 ${mode === "signup" ? "translate-x-[calc(100%+4px)]" : "translate-x-1"}`} />
+              <button type="button" role="tab" aria-selected={mode === "login"} onClick={() => { setMode("login"); setErr(""); setMsg(""); }}
+                className={`relative z-10 rounded-xl py-2.5 transition ${mode === "login" ? "text-navy-900" : "text-zinc-500 hover:text-zinc-800"}`}>Entrar</button>
+              <button type="button" role="tab" aria-selected={mode === "signup"} onClick={() => { setMode("signup"); setErr(""); setMsg(""); }}
+                className={`relative z-10 rounded-xl py-2.5 transition ${mode === "signup" ? "text-navy-900" : "text-zinc-500 hover:text-zinc-800"}`}>Criar conta</button>
+            </div>
+          )}
+          <div key={mode} className="animate-fade-in space-y-4">
           <div className="mb-2">
-            <h1 className="text-3xl font-black tracking-tight">
+            <h1 className="text-3xl font-black tracking-tight text-navy-900">
               {mode === "login" ? "Bem-vindo de volta" : mode === "signup" ? "Crie sua loja grátis" : "Recuperar senha"}
             </h1>
             <p className="mt-1 text-sm text-zinc-500">
@@ -68,24 +79,31 @@ function LoginForm() {
           <Field label={mode === "login" ? "E-mail ou usuário" : "E-mail"}><input className="input" type={mode === "login" ? "text" : "email"} required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete={mode === "login" ? "username" : "email"} autoCapitalize="none" /></Field>
           {mode !== "reset" && (
             <Field label="Senha" hint={mode === "signup" ? "Mínimo de 10 caracteres." : undefined}>
-              <input className="input" type="password" required minLength={mode === "signup" ? 10 : 1} value={password}
-                onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+              <span className="relative block">
+                <input className="input pr-16" type={showPwd ? "text" : "password"} required minLength={mode === "signup" ? 10 : 1} value={password}
+                  onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+                <button type="button" onClick={() => setShowPwd(!showPwd)} aria-label={showPwd ? "Ocultar senha" : "Mostrar senha"}
+                  className="absolute inset-y-0 right-2 my-auto h-8 rounded-lg px-2 text-xs font-semibold text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800">
+                  {showPwd ? "Ocultar" : "Mostrar"}
+                </button>
+              </span>
             </Field>
           )}
           <Alert>{err}</Alert>
           <Alert kind="success">{msg}</Alert>
-          <button className="btn-primary w-full py-3" disabled={busy}>
+          <button className="btn-primary group w-full py-3.5 text-base transition hover:-translate-y-0.5" disabled={busy}>
+            {busy && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />}
             {busy ? "Aguarde..." : mode === "login" ? "Entrar" : mode === "signup" ? "Criar conta" : "Enviar link"}
           </button>
           <div className="flex justify-between pt-1 text-sm">
             {mode === "login" ? (
-              <>
-                <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => setMode("signup")}>Criar conta</button>
-                <button type="button" className="text-zinc-500 hover:underline" onClick={() => setMode("reset")}>Esqueci a senha</button>
-              </>
+              <button type="button" className="text-zinc-500 transition hover:text-brand-700 hover:underline" onClick={() => setMode("reset")}>Esqueci a senha</button>
+            ) : mode === "reset" ? (
+              <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => setMode("login")}>← Voltar para o login</button>
             ) : (
-              <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => setMode("login")}>Já tenho conta</button>
+              <span className="text-xs text-zinc-500">Ao criar a conta você aceita os termos de uso e a política de privacidade.</span>
             )}
+          </div>
           </div>
         </form>
     </AuthShell>
