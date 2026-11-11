@@ -1,63 +1,67 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePanel } from "@/lib/panel/context";
 import { Alert, Empty, Field, Modal } from "@/components/ui";
 import { brl, errorMessage, formatPhone } from "@/lib/format";
-import { MessageEditor, blankMessage, fromCents, messagePayload, type MessageForm } from "./editor";
-import { MSG_STATUS, SEGMENTS, STATUS, couponLabel, segmentLabel, type Campaign, type Segment, type Stats } from "./shared";
+import { MessageEditor, blankMessage, messagePayload, type MessageForm } from "./editor";
+import { CAMPAIGN_STATUS, MESSAGE_STATUS, SEGMENT_LABEL, fmtDate, segmentText, type Campaign, type Message, type Segment, type Stats } from "./shared";
 
-type Msg = { id: number; phone: string; body: string; coupon_code: string | null; status: string; error: string | null;
-  sent_at: string | null; converted_order_id: string | null; customers: { name: string } | null };
-
-export function Campaigns({ apiReady, freqDays }: { apiReady: boolean; freqDays: number }) {
+export function Campaigns({ apiReady }: { apiReady: boolean }) {
   const { tenantId } = usePanel();
   const sb = supabaseBrowser();
-  const [list, setList] = useState<Campaign[]>([]);
+  const [rows, setRows] = useState<Campaign[]>([]);
   const [stats, setStats] = useState<Record<string, Stats>>({});
   const [err, setErr] = useState("");
-  const [editing, setEditing] = useState<Campaign | "new" | null>(null);
+  const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState<Campaign | null>(null);
-
   const load = useCallback(async () => {
     const [a, b] = await Promise.all([
       sb.from("campaigns").select("*").eq("tenant_id", tenantId).eq("kind", "manual").order("created_at", { ascending: false }).limit(100),
       sb.rpc("campaign_stats", { p_tenant_id: tenantId }),
     ]);
-    if (a.error) setErr(errorMessage(a.error)); else setList(a.data as Campaign[]);
+    if (a.error) setErr(errorMessage(a.error)); else setRows(a.data as Campaign[]);
     if (!b.error) setStats((b.data ?? {}) as Record<string, Stats>);
   }, [sb, tenantId]);
   useEffect(() => { void load(); }, [load]);
 
+  async function launch(c: Campaign) {
+    if (!confirm(`Disparar "${c.name}"? As mensagens serão geradas para o público atual.`)) return;
+    setErr("");
+    const { data, error } = await sb.rpc("campaign_launch", { p_id: c.id });
+    if (error) { setErr(errorMessage(error)); return; }
+    await load();
+    alert(`${(data as { messages: number }).messages} mensagem(ns) prontas.` + (c.channel === "manual_links" ? " Abra a campanha para enviar pelo WhatsApp." : " O envio começa em instantes."));
+    setDetail({ ...c, status: c.channel === "manual_links" ? "done" : "sending" });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-zinc-600">Só recebem clientes que autorizaram marketing no pedido, no máximo uma mensagem a cada {freqDays} dia(s).</p>
-        <button className="btn-primary" onClick={() => setEditing("new")}>+ Nova campanha</button>
+        <p className="text-sm text-zinc-600">Campanhas avulsas: escolha um público, escreva a mensagem e dispare.</p>
+        <button className="btn-primary" onClick={() => setCreating(true)}>+ Nova campanha</button>
       </div>
       <Alert>{err}</Alert>
-      {list.length === 0 ? <Empty>Nenhuma campanha ainda. Comece com uma para quem não pede há 30 dias, com um cupom de volta.</Empty> : (
+      {rows.length === 0 ? <Empty>Nenhuma campanha ainda. Que tal chamar de volta quem não pede há 30 dias?</Empty> : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-zinc-50 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              <tr><th className="p-3">Campanha</th><th className="p-3">Público</th><th className="p-3">Canal</th><th className="p-3">Situação</th>
-                <th className="p-3 text-right">Enviadas</th><th className="p-3 text-right">Entregues / lidas</th><th className="p-3 text-right">Pediram de novo</th><th /></tr>
+              <tr><th className="p-3">Campanha</th><th className="p-3">Público</th><th className="p-3">Envio</th><th className="p-3">Status</th><th className="p-3 text-right">Enviadas</th><th className="p-3 text-right">Pediram de novo</th><th /></tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {list.map((c) => {
-                const s = stats[c.id]; const st = STATUS[c.status] ?? STATUS.draft;
+              {rows.map((c) => {
+                const s = stats[c.id];
                 return (
                   <tr key={c.id}>
-                    <td className="p-3"><p className="font-medium">{c.name}</p><p className="text-xs text-zinc-500">{couponLabel(c)}</p></td>
-                    <td className="p-3 text-zinc-600">{segmentLabel(c.segment)}</td>
-                    <td className="p-3 text-zinc-600">{c.channel === "whatsapp_api" ? "API do WhatsApp" : "Manual"}</td>
-                    <td className="p-3"><span className={`badge ${st.cls}`}>{st.label}</span></td>
-                    <td className="p-3 text-right tabular-nums">{s ? `${s.sent} de ${s.total}` : "—"}</td>
-                    <td className="p-3 text-right tabular-nums">{s && c.channel === "whatsapp_api" ? `${s.delivered} / ${s.read}` : "—"}</td>
-                    <td className="p-3 text-right tabular-nums">{s ? <>{s.converted}{s.revenue_cents > 0 && <span className="block text-xs text-green-700">{brl(s.revenue_cents)}</span>}</> : "—"}</td>
+                    <td className="p-3 font-medium">{c.name}<span className="block text-xs text-zinc-500">{fmtDate(c.launched_at ?? c.created_at)}</span></td>
+                    <td className="p-3">{segmentText(c.segment)}</td>
+                    <td className="p-3">{c.channel === "whatsapp_api" ? "API do WhatsApp" : "Manual"}</td>
+                    <td className="p-3"><span className={`badge ${CAMPAIGN_STATUS[c.status].cls}`}>{CAMPAIGN_STATUS[c.status].label}</span></td>
+                    <td className="p-3 text-right tabular-nums">{s ? `${s.sent}/${s.total}` : "—"}{s && s.read > 0 ? <span className="block text-xs text-zinc-500">{s.read} lida(s)</span> : null}</td>
+                    <td className="p-3 text-right tabular-nums">{s ? s.converted : "—"}{s && s.revenue_cents > 0 ? <span className="block text-xs text-green-700">{brl(s.revenue_cents)}</span> : null}</td>
                     <td className="whitespace-nowrap p-3 text-right">
-                      {c.status === "draft" && <button className="btn-ghost" onClick={() => setEditing(c)}>Editar</button>}
-                      <button className="btn-secondary" onClick={() => setDetail(c)}>{c.status === "draft" ? "Disparar" : "Abrir"}</button>
+                      {c.status === "draft" ? <button className="btn-primary" onClick={() => void launch(c)}>Disparar</button>
+                        : <button className="btn-secondary" onClick={() => setDetail(c)}>Abrir</button>}
                     </td>
                   </tr>
                 );
@@ -66,36 +70,27 @@ export function Campaigns({ apiReady, freqDays }: { apiReady: boolean; freqDays:
           </table>
         </div>
       )}
-      {editing && <CampaignEditor campaign={editing === "new" ? null : editing} apiReady={apiReady}
-        onClose={() => setEditing(null)} onSaved={async (c) => { setEditing(null); await load(); setDetail(c); }} />}
-      {detail && <CampaignDetail campaign={detail} stats={stats[detail.id]} onClose={() => { setDetail(null); void load(); }} onChanged={load} />}
+      {creating && <NewCampaign apiReady={apiReady} onClose={() => setCreating(false)} onSaved={async () => { setCreating(false); await load(); }} />}
+      {detail && <CampaignDetail campaign={detail} stats={stats[detail.id]} onClose={() => setDetail(null)} onChanged={load} />}
     </div>
   );
 }
 
-function CampaignEditor({ campaign, apiReady, onClose, onSaved }: {
-  campaign: Campaign | null; apiReady: boolean; onClose: () => void; onSaved: (c: Campaign) => void;
-}) {
+function NewCampaign({ apiReady, onClose, onSaved }: { apiReady: boolean; onClose: () => void; onSaved: () => Promise<void> }) {
   const { tenantId, unit } = usePanel();
   const sb = supabaseBrowser();
-  const [name, setName] = useState(campaign?.name ?? "");
-  const [segment, setSegment] = useState<Segment>(campaign?.segment ?? { type: "inactive", days: 30 });
-  const [f, setF] = useState<MessageForm>(() => campaign ? {
-    message: campaign.message, channel: campaign.channel, template_name: campaign.template_name ?? "", template_lang: campaign.template_lang,
-    template_params: campaign.template_params, coupon_mode: campaign.coupon_mode, coupon_kind: campaign.coupon_kind,
-    coupon_value: campaign.coupon_kind === "fixed" ? fromCents(campaign.coupon_value) : String(campaign.coupon_value),
-    coupon_min: campaign.coupon_min_order_cents ? fromCents(campaign.coupon_min_order_cents) : "", coupon_valid_days: String(campaign.coupon_valid_days),
-  } : { ...blankMessage("Oi, {nome}! Sentimos sua falta aqui na {loja}. Use o cupom {cupom} no seu próximo pedido: {link}"), coupon_mode: "unique" });
+  const [name, setName] = useState("");
+  const [seg, setSeg] = useState<Segment>({ type: "inactive", days: 30 });
+  const [f, setF] = useState<MessageForm>(blankMessage());
   const [count, setCount] = useState<{ eligible: number; opted_in: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-
-  const segKey = JSON.stringify(segment);
+  const segKey = JSON.stringify(seg);
   useEffect(() => {
     let alive = true;
     const t = setTimeout(async () => {
-      const { data } = await sb.rpc("campaign_audience_count", { p_tenant_id: tenantId, p_segment: segment });
-      if (alive && data) setCount(data);
+      const { data } = await sb.rpc("campaign_audience_count", { p_tenant_id: tenantId, p_segment: seg });
+      if (alive && data) setCount(data as { eligible: number; opted_in: number; total: number });
     }, 300);
     return () => { alive = false; clearTimeout(t); };
   }, [segKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -103,163 +98,121 @@ function CampaignEditor({ campaign, apiReady, onClose, onSaved }: {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setErr("");
-    const { data, error } = await sb.rpc("campaign_save", { p_id: campaign?.id ?? null, p_tenant_id: tenantId,
-      p: { name: name.trim(), kind: "manual", segment, unit_id: unit.id, ...messagePayload(f) } });
-    if (error) { setBusy(false); setErr(errorMessage(error)); return; }
-    const { data: row } = await sb.from("campaigns").select("*").eq("id", data as string).single();
+    const { error } = await sb.rpc("campaign_save", { p_id: null, p_tenant_id: tenantId,
+      p: { name: name.trim(), kind: "manual", segment: seg, unit_id: unit.id, ...messagePayload(f) } });
     setBusy(false);
-    onSaved(row as Campaign);
+    if (error) { setErr(errorMessage(error)); return; }
+    await onSaved();
   }
+  const types = useMemo(() => (["inactive", "new", "top", "birthday_month", "all"] as const), []);
 
-  const seg = SEGMENTS.find((s) => s.type === segment.type);
   return (
-    <Modal open onClose={onClose} title={campaign ? "Editar campanha" : "Nova campanha"} wide>
+    <Modal open onClose={onClose} title="Nova campanha" wide>
       <form onSubmit={save} className="space-y-4">
-        <Field label="Nome da campanha (só você vê)"><input className="input" required minLength={2} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Volta logo — março" /></Field>
-        <div>
-          <span className="label">Público</span>
-          <div className="flex flex-wrap gap-2">
-            {SEGMENTS.map((s) => (
-              <button key={s.type} type="button" onClick={() => setSegment({ type: s.type, days: s.type === "inactive" || s.type === "new" ? 30 : undefined, min_orders: s.type === "top" ? 5 : undefined })}
-                className={`rounded-lg border px-3 py-1.5 text-sm ${segment.type === s.type ? "border-brand-500 bg-brand-50 text-brand-700" : "border-zinc-300 bg-white text-zinc-700"}`}>{s.label}</button>
+        <Field label="Nome da campanha (só para você)"><input className="input" required minLength={2} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Volta logo — novembro" /></Field>
+        <div className="rounded-lg border border-zinc-200 p-3">
+          <p className="mb-2 text-sm font-medium">Público</p>
+          <div className="flex flex-wrap gap-2 text-sm">
+            {types.map((t) => (
+              <label key={t} className={`cursor-pointer rounded-lg border px-3 py-1.5 ${seg.type === t ? "border-brand-500 bg-brand-50 text-brand-700" : "border-zinc-200"}`}>
+                <input type="radio" className="sr-only" checked={seg.type === t}
+                  onChange={() => setSeg(t === "inactive" ? { type: t, days: 30 } : t === "new" ? { type: t, days: 30 } : t === "top" ? { type: t, min_orders: 5 } : { type: t })} />
+                {SEGMENT_LABEL[t]}
+              </label>
             ))}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-zinc-600">
-            <span>{seg?.hint}</span>
-            {(segment.type === "inactive" || segment.type === "new") && (
-              <label className="flex items-center gap-2">dias: <input className="input w-20 py-1" type="number" min={1} max={365} value={segment.days ?? 30}
-                onChange={(e) => setSegment({ ...segment, days: Math.max(1, Number(e.target.value) || 1) })} /></label>
-            )}
-            {segment.type === "top" && (
-              <label className="flex items-center gap-2">pedidos: <input className="input w-20 py-1" type="number" min={1} max={500} value={segment.min_orders ?? 5}
-                onChange={(e) => setSegment({ ...segment, min_orders: Math.max(1, Number(e.target.value) || 1) })} /></label>
-            )}
-          </div>
+          {(seg.type === "inactive" || seg.type === "new") && (
+            <div className="mt-3 w-48"><Field label={seg.type === "inactive" ? "Sem pedir há (dias)" : "1º pedido nos últimos (dias)"}>
+              <input className="input" type="number" min={1} max={365} value={seg.days ?? 30} onChange={(e) => setSeg({ ...seg, days: Number(e.target.value) || 30 })} />
+            </Field></div>
+          )}
+          {seg.type === "top" && (
+            <div className="mt-3 w-48"><Field label="Mínimo de pedidos">
+              <input className="input" type="number" min={2} max={500} value={seg.min_orders ?? 5} onChange={(e) => setSeg({ ...seg, min_orders: Number(e.target.value) || 5 })} />
+            </Field></div>
+          )}
           {count && (
-            <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-sm">
-              <b className="tabular-nums">{count.eligible}</b> cliente(s) vão receber · {count.opted_in} autorizaram marketing de {count.total} no total
-            </p>
+            <p className="mt-3 text-sm"><b className="tabular-nums">{count.eligible}</b> cliente(s) vão receber · {count.opted_in} autorizaram marketing de {count.total} no total.
+              <span className="block text-xs text-zinc-500">Ficam de fora quem não autorizou, quem pediu para sair e quem recebeu mensagem recentemente.</span></p>
           )}
         </div>
         <MessageEditor f={f} set={(p) => setF((x) => ({ ...x, ...p }))} kind="manual" store={unit.name} slug={unit.slug} apiReady={apiReady} />
         <Alert>{err}</Alert>
-        <div className="flex justify-end gap-2">
+        <div className="flex gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" disabled={busy}>{busy ? "Salvando..." : "Salvar rascunho"}</button>
+          <button className="btn-primary flex-1" disabled={busy}>{busy ? "Salvando..." : "Salvar rascunho"}</button>
         </div>
+        <p className="text-xs text-zinc-500">Depois de salvar, clique em “Disparar” na lista. Os cupons são criados no disparo.</p>
       </form>
     </Modal>
   );
 }
 
-export function CampaignDetail({ campaign, stats, onClose, onChanged }: { campaign: Campaign; stats?: Stats; onClose: () => void; onChanged: () => Promise<void> }) {
-  const { tenantId } = usePanel();
+export function CampaignDetail({ campaign, stats, onClose, onChanged }: { campaign: Campaign; stats?: Stats; onClose: () => void; onChanged?: () => Promise<void> | void }) {
   const sb = supabaseBrowser();
-  const [c, setC] = useState(campaign);
-  const [rows, setRows] = useState<Msg[]>([]);
-  const [count, setCount] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<Message[]>([]);
+  const [filter, setFilter] = useState<"pending" | "all">("pending");
   const [err, setErr] = useState("");
-  const [msg, setMsg] = useState("");
-
   const load = useCallback(async () => {
-    const [a, b] = await Promise.all([
-      sb.from("campaign_messages").select("id, phone, body, coupon_code, status, error, sent_at, converted_order_id, customers(name)")
-        .eq("campaign_id", campaign.id).order("id").limit(2000),
-      sb.from("campaigns").select("*").eq("id", campaign.id).single(),
-    ]);
-    if (a.error) setErr(errorMessage(a.error)); else setRows(a.data as unknown as Msg[]);
-    if (b.data) setC(b.data as Campaign);
+    const { data, error } = await sb.from("campaign_messages").select("id, campaign_id, customer_id, phone, body, coupon_code, status, error, sent_at, converted_order_id, created_at, customers(name)")
+      .eq("campaign_id", campaign.id).order("id").limit(2000);
+    if (error) setErr(errorMessage(error)); else setRows(data as unknown as Message[]);
   }, [sb, campaign.id]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    if (campaign.status !== "draft") return;
-    (async () => {
-      const { data } = await sb.rpc("campaign_audience_count", { p_tenant_id: tenantId, p_segment: campaign.segment });
-      setCount((data as { eligible?: number } | null)?.eligible ?? null);
-    })();
-  }, [sb, tenantId, campaign.status, campaign.segment]);
 
-  async function launch() {
-    if (!confirm(`Disparar "${c.name}" agora?${count != null ? ` ${count} cliente(s) vão receber.` : ""}`)) return;
-    setBusy(true); setErr(""); setMsg("");
-    const { data, error } = await sb.rpc("campaign_launch", { p_id: c.id });
-    setBusy(false);
-    if (error) { setErr(errorMessage(error)); return; }
-    setMsg(c.channel === "whatsapp_api" ? `${data.messages} mensagem(ns) na fila de envio. A Meta envia dentro da janela de horário configurada.`
-      : `${data.messages} mensagem(ns) prontas. Envie uma por uma abaixo.`);
-    await load(); await onChanged();
-  }
-
-  async function mark(m: Msg, done: boolean) {
+  async function mark(m: Message, done: boolean) {
     const { error } = await sb.rpc("campaign_message_mark", { p_message_id: m.id, p_done: done });
-    if (error) setErr(errorMessage(error)); else setRows((rs) => rs.map((r) => r.id === m.id ? { ...r, status: done ? "manual_done" : "skipped", sent_at: done ? new Date().toISOString() : null } : r));
+    if (error) { setErr(errorMessage(error)); return; }
+    setRows((rs) => rs.map((r) => (r.id === m.id ? { ...r, status: done ? "manual_done" : "skipped", sent_at: done ? new Date().toISOString() : null } : r)));
+    void onChanged?.();
   }
-  function openWa(m: Msg) {
+  function openWa(m: Message) {
     window.open(`https://wa.me/${m.phone}?text=${encodeURIComponent(m.body)}`, "_blank", "noopener,noreferrer");
     void mark(m, true);
   }
-
-  const total = rows.length;
+  const pending = rows.filter((r) => r.status === "manual_pending");
   const done = rows.filter((r) => ["manual_done", "sent", "delivered", "read"].includes(r.status)).length;
-  const st = STATUS[c.status] ?? STATUS.draft;
+  const shown = filter === "pending" ? (pending.length ? pending : rows) : rows;
+  const converted = rows.filter((r) => r.converted_order_id).length;
+
   return (
-    <Modal open onClose={onClose} title={c.name} wide>
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-600">
-          <span className={`badge ${st.cls}`}>{st.label}</span>
-          <span>{segmentLabel(c.segment)}</span><span>·</span><span>{couponLabel(c)}</span><span>·</span>
-          <span>{c.channel === "whatsapp_api" ? `API do WhatsApp (${c.template_name})` : "Manual pelo WhatsApp"}</span>
-        </div>
-        <Alert>{err}</Alert>
-        <Alert kind="success">{msg}</Alert>
-        {c.status === "draft" ? (
-          <div className="rounded-lg border border-zinc-200 p-4">
-            <p className="text-sm text-zinc-700">{count == null ? "Calculando o público..." : `${count} cliente(s) vão receber esta campanha agora.`}
-              {c.coupon_mode === "unique" && " Um cupom de uso único será criado para cada cliente."}</p>
-            <p className="mt-2 whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-sm">{c.message}</p>
-            <button className="btn-primary mt-3" disabled={busy || count === 0} onClick={launch}>{busy ? "Disparando..." : "Disparar campanha"}</button>
+    <Modal open onClose={onClose} title={campaign.name} wide>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="font-medium">{done} de {rows.length} enviada(s)</span>
+          <span className="text-zinc-500">· {converted} pediram de novo{stats?.revenue_cents ? ` (${brl(stats.revenue_cents)})` : ""}</span>
+          <div className="ml-auto flex rounded-lg bg-zinc-100 p-0.5 text-xs font-medium">
+            {(["pending", "all"] as const).map((k) => (
+              <button key={k} type="button" onClick={() => setFilter(k)} className={`rounded-md px-2.5 py-1 ${filter === k ? "bg-white shadow-sm" : "text-zinc-500"}`}>{k === "pending" ? "A enviar" : "Todas"}</button>
+            ))}
           </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">{done} de {total} enviadas{stats?.converted ? ` · ${stats.converted} pediram de novo (${brl(stats.revenue_cents)})` : ""}</p>
-              <button className="btn-ghost text-sm" onClick={() => void load()}>Atualizar</button>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded bg-zinc-100"><div className="h-full bg-green-500" style={{ width: `${total ? (done / total) * 100 : 0}%` }} /></div>
-            {c.channel === "manual_links" && rows.some((r) => r.status === "manual_pending") && (
-              <p className="text-xs text-zinc-500">Toque em “Abrir no WhatsApp”: a conversa abre com a mensagem pronta; é só enviar. A linha já fica marcada como enviada.</p>
-            )}
-            <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-zinc-200">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-zinc-50 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  <tr><th className="p-2.5">Cliente</th><th className="p-2.5">Cupom</th><th className="p-2.5">Situação</th><th /></tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100">
-                  {rows.map((m) => {
-                    const ms = MSG_STATUS[m.status] ?? MSG_STATUS.queued;
-                    return (
-                      <tr key={m.id}>
-                        <td className="p-2.5"><p className="font-medium">{m.customers?.name ?? "Cliente"}</p>
-                          <p className="text-xs tabular-nums text-zinc-500">{formatPhone(m.phone.replace(/^55/, ""))}</p></td>
-                        <td className="p-2.5 font-mono text-xs">{m.coupon_code ?? "—"}</td>
-                        <td className="p-2.5"><span className={`badge ${ms.cls}`}>{ms.label}</span>
-                          {m.converted_order_id && <span className="badge ml-1 bg-brand-50 text-brand-700">Pediu de novo</span>}
-                          {m.error && <span className="block text-xs text-red-700">{m.error}</span>}</td>
-                        <td className="whitespace-nowrap p-2.5 text-right">
-                          {m.status === "manual_pending" && <>
-                            <button className="btn-ghost text-xs" onClick={() => void mark(m, false)}>Pular</button>
-                            <button className="btn-success text-xs" onClick={() => openWa(m)}>Abrir no WhatsApp</button>
-                          </>}
-                          {m.status === "skipped" && <button className="btn-ghost text-xs" onClick={() => openWa(m)}>Enviar mesmo assim</button>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
+        </div>
+        {rows.length > 0 && <div className="h-1.5 overflow-hidden rounded bg-zinc-100"><div className="h-full bg-green-500" style={{ width: `${(done / rows.length) * 100}%` }} /></div>}
+        {campaign.channel === "manual_links" && pending.length > 0 && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Clique em “Abrir no WhatsApp”, envie a mensagem e volte aqui para a próxima. Ela já fica marcada como enviada.</p>
+        )}
+        <Alert>{err}</Alert>
+        {rows.length === 0 ? <Empty>Nenhuma mensagem ainda.</Empty> : (
+          <ul className="max-h-[55vh] divide-y divide-zinc-100 overflow-y-auto rounded-lg border border-zinc-200">
+            {shown.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-3 p-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{m.customers?.name ?? "Cliente"} <span className="font-normal text-zinc-500">· {formatPhone(m.phone.replace(/^55/, ""))}</span></p>
+                  <p className="truncate text-xs text-zinc-500">{m.body}</p>
+                  {m.coupon_code && <p className="text-xs">Cupom: <span className="font-mono">{m.coupon_code}</span></p>}
+                  {m.error && <p className="text-xs text-red-700">{m.error}</p>}
+                </div>
+                <span className={`badge ${MESSAGE_STATUS[m.status].cls}`}>{MESSAGE_STATUS[m.status].label}</span>
+                {m.converted_order_id && <span className="badge bg-green-100 text-green-800">Pediu</span>}
+                {m.status === "manual_pending" && (
+                  <span className="flex gap-1">
+                    <button className="btn-success" onClick={() => openWa(m)}>Abrir no WhatsApp</button>
+                    <button className="btn-ghost" onClick={() => void mark(m, false)}>Pular</button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </Modal>

@@ -6,7 +6,7 @@ import { Alert, Empty } from "@/components/ui";
 import { errorMessage } from "@/lib/format";
 import { Campaigns } from "./campaigns";
 import { Automations } from "./automations";
-import { WhatsAppSettings } from "./whatsapp";
+import { WhatsAppSettings } from "./settings";
 import type { Settings } from "./shared";
 
 type Tab = "campaigns" | "automations" | "whatsapp";
@@ -19,7 +19,6 @@ export default function Marketing() {
   const [s, setS] = useState<Settings | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
-
   const load = useCallback(async () => {
     const { data, error } = await sb.from("marketing_settings").select("*").eq("tenant_id", tenantId).maybeSingle();
     if (error) setErr(errorMessage(error)); else setS((data as Settings | null) ?? null);
@@ -27,14 +26,17 @@ export default function Marketing() {
   }, [sb, tenantId]);
   useEffect(() => { if (canManage(role)) void load(); }, [load, role]);
 
-  if (!canManage(role)) return <Empty>O marketing é feito pela gerência.</Empty>;
+  if (!canManage(role)) return <Empty>O marketing é gerenciado pelo dono e pela gerência.</Empty>;
   const apiReady = !!s?.wa_enabled;
-  const freq = s?.frequency_days ?? 7;
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="h1">Marketing e WhatsApp</h1>
-        <p className="text-sm text-zinc-500">Campanhas e automações para trazer o cliente de volta, com cupom automático. Só recebe quem autorizou marketing no pedido (LGPD).</p>
+        <p className="mt-1 max-w-3xl text-sm text-zinc-600">
+          Chame de volta quem sumiu, parabenize aniversariantes e mande cupons. Só recebem clientes que autorizaram ofertas no pedido.
+          O envio manual pelo WhatsApp da loja funciona hoje; o envio automático usa a API oficial do WhatsApp, que depende da aprovação da Meta.
+        </p>
       </div>
       <div className="flex gap-1 border-b border-zinc-200" role="tablist">
         {TABS.map(([k, l]) => (
@@ -43,9 +45,9 @@ export default function Marketing() {
         ))}
       </div>
       <Alert>{err}</Alert>
-      {loaded && tab === "campaigns" && <Campaigns apiReady={apiReady} freqDays={freq} />}
-      {loaded && tab === "automations" && <Automations apiReady={apiReady} freqDays={freq} />}
-      {loaded && tab === "whatsapp" && <WhatsAppSettings s={s} onChanged={load} />}
+      {loaded && tab === "campaigns" && <Campaigns apiReady={apiReady} />}
+      {loaded && tab === "automations" && <Automations apiReady={apiReady} freqDays={s?.frequency_days ?? 7} />}
+      {loaded && tab === "whatsapp" && <WhatsAppSettings settings={s} onChanged={load} />}
     </div>
   );
 }

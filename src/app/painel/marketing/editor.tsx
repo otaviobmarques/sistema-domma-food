@@ -1,131 +1,132 @@
 "use client";
 import { useRef } from "react";
 import { Field } from "@/components/ui";
-import { PLACEHOLDERS, couponExample, renderPreview, type Channel, type CouponKind, type CouponMode } from "./shared";
+import { centsToInput, parseBRL } from "@/lib/format";
+import { PLACEHOLDERS, render, type Campaign } from "./shared";
 
 export type MessageForm = {
-  message: string; channel: Channel; template_name: string; template_lang: string; template_params: string[];
-  coupon_mode: CouponMode; coupon_kind: CouponKind; coupon_value: string; coupon_min: string; coupon_valid_days: string;
+  message: string; channel: Campaign["channel"]; template_name: string; template_lang: string; template_params: string[];
+  coupon_mode: Campaign["coupon_mode"]; coupon_kind: Campaign["coupon_kind"]; coupon_value: string; coupon_min: string; coupon_valid_days: string;
 };
-
-export const toCents = (s: string) => Math.round((Number(s.replace(/\./g, "").replace(",", ".")) || 0) * 100);
-export const fromCents = (c: number) => (c / 100).toFixed(2).replace(".", ",");
-
+export const fromCents = (c: number | null | undefined) => centsToInput(c ?? 0);
+export function blankMessage(message = "Oi, {nome}! Sentimos sua falta na {loja}. Use o cupom {cupom} no seu próximo pedido: {link}"): MessageForm {
+  return { message, channel: "manual_links", template_name: "", template_lang: "pt_BR", template_params: ["nome", "cupom"],
+    coupon_mode: "unique", coupon_kind: "percent", coupon_value: "10", coupon_min: "", coupon_valid_days: "7" };
+}
 export function messagePayload(f: MessageForm) {
   return {
     message: f.message.trim(), channel: f.channel,
-    template_name: f.channel === "whatsapp_api" ? f.template_name.trim() : null,
-    template_lang: f.template_lang.trim() || "pt_BR", template_params: f.template_params,
+    template_name: f.channel === "whatsapp_api" ? f.template_name.trim() : "", template_lang: f.template_lang || "pt_BR",
+    template_params: f.template_params.length ? f.template_params : ["nome"],
     coupon_mode: f.coupon_mode, coupon_kind: f.coupon_kind,
-    coupon_value: f.coupon_kind === "percent" ? Math.round(Number(f.coupon_value) || 0) : f.coupon_kind === "fixed" ? toCents(f.coupon_value) : 0,
-    coupon_min_order_cents: toCents(f.coupon_min), coupon_valid_days: Math.round(Number(f.coupon_valid_days) || 7),
+    coupon_value: f.coupon_kind === "fixed" ? parseBRL(f.coupon_value) : f.coupon_kind === "free_delivery" ? 0 : Math.round(Number(f.coupon_value.replace(",", ".")) || 0),
+    coupon_min_order_cents: parseBRL(f.coupon_min), coupon_valid_days: Math.min(90, Math.max(1, Number(f.coupon_valid_days) || 7)),
   };
 }
 
-export function MessageEditor({ f, set, kind, store, slug, apiReady, disabled }: {
-  f: MessageForm; set: (p: Partial<MessageForm>) => void; kind: "manual" | "birthday" | "winback";
-  store: string; slug: string; apiReady: boolean; disabled?: boolean;
+export function MessageEditor({ f, set, kind, store, slug, apiReady }: {
+  f: MessageForm; set: (p: Partial<MessageForm>) => void; kind?: Campaign["kind"]; store: string; slug: string; apiReady: boolean;
 }) {
-  const ta = useRef<HTMLTextAreaElement>(null);
-  function insert(key: string) {
-    const el = ta.current; const tag = `{${key}}`;
+  const ref = useRef<HTMLTextAreaElement>(null);
+  function insert(tag: string) {
+    const el = ref.current;
     if (!el) { set({ message: f.message + tag }); return; }
-    const s = el.selectionStart ?? f.message.length, e = el.selectionEnd ?? s;
-    set({ message: f.message.slice(0, s) + tag + f.message.slice(e) });
-    requestAnimationFrame(() => { el.focus(); el.selectionStart = el.selectionEnd = s + tag.length; });
+    const a = el.selectionStart ?? f.message.length, b = el.selectionEnd ?? a;
+    set({ message: f.message.slice(0, a) + tag + f.message.slice(b) });
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(a + tag.length, a + tag.length); });
   }
-  const preview = renderPreview(f.message, store, slug, couponExample(f.coupon_mode, kind));
+  const coupon = f.coupon_mode === "none" ? "" : kind === "birthday" ? "NIVER4H8T2M" : kind === "winback" ? "VOLTA7K2P9Q" : "DOMMA3F9X1Z";
+  const preview = render(f.message, { store, slug, coupon });
+  const toggleParam = (k: string) => set({ template_params: f.template_params.includes(k) ? f.template_params.filter((x) => x !== k) : [...f.template_params, k] });
+
   return (
-    <fieldset disabled={disabled} className="space-y-4">
-      <div>
-        <span className="label">Mensagem</span>
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {PLACEHOLDERS.map((p) => (
-            <button key={p.key} type="button" onClick={() => insert(p.key)}
-              className="rounded-full border border-zinc-300 bg-white px-2.5 py-0.5 text-xs font-medium text-zinc-700 hover:border-brand-400 hover:text-brand-700">+ {p.label}</button>
-          ))}
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-2">
+          <Field label="Mensagem">
+            <textarea ref={ref} className="input min-h-32" maxLength={1000} value={f.message} onChange={(e) => set({ message: e.target.value })} />
+          </Field>
+          <div className="flex flex-wrap gap-1.5">
+            {PLACEHOLDERS.map((p) => (
+              <button key={p.key} type="button" className="badge bg-zinc-100 text-zinc-700 hover:bg-zinc-200" onClick={() => insert(p.tag)}>+ {p.label}</button>
+            ))}
+          </div>
+          {f.coupon_mode === "none" && f.message.includes("{cupom}") && <p className="text-xs text-amber-700">A mensagem usa {"{cupom}"}, mas nenhum cupom está configurado.</p>}
         </div>
-        <textarea ref={ta} className="input min-h-28" maxLength={1000} value={f.message} onChange={(e) => set({ message: e.target.value })} />
-        <div className="mt-2 rounded-lg bg-[#e7f7e1] p-3 text-sm text-zinc-800">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-green-800">Prévia</p>
-          <p className="whitespace-pre-wrap break-words">{preview || "…"}</p>
+        <div>
+          <p className="label">Prévia</p>
+          <div className="rounded-lg bg-[#e5ddd5] p-3">
+            <div className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-lg rounded-tr-none bg-[#dcf8c6] px-3 py-2 text-sm text-zinc-900 shadow-sm">
+              {preview || <span className="text-zinc-400">Escreva a mensagem…</span>}
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">Exemplo com dados fictícios. Cada cliente recebe o próprio nome e cupom.</p>
         </div>
       </div>
 
-      <div>
-        <span className="label">Cupom</span>
-        <div className="flex flex-wrap gap-2">
-          {([["none", "Sem cupom"], ["unique", "Único por cliente"], ["shared", "Um código para todos"]] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => set({ coupon_mode: k })}
-              className={`rounded-lg border px-3 py-1.5 text-sm ${f.coupon_mode === k ? "border-brand-500 bg-brand-50 text-brand-700" : "border-zinc-300 bg-white text-zinc-700"}`}>{l}</button>
+      <div className="rounded-lg border border-zinc-200 p-3">
+        <p className="mb-2 text-sm font-medium">Cupom</p>
+        <div className="flex flex-wrap gap-2 text-sm">
+          {([["none", "Sem cupom"], ["unique", "Um código por cliente"], ["shared", "Um código para todos"]] as const).map(([v, l]) => (
+            <label key={v} className={`cursor-pointer rounded-lg border px-3 py-1.5 ${f.coupon_mode === v ? "border-brand-500 bg-brand-50 text-brand-700" : "border-zinc-200"}`}>
+              <input type="radio" className="sr-only" checked={f.coupon_mode === v} onChange={() => set({ coupon_mode: v })} />{l}
+            </label>
           ))}
         </div>
         {f.coupon_mode !== "none" && (
           <div className="mt-3 grid gap-3 sm:grid-cols-4">
             <Field label="Tipo">
-              <select className="input" value={f.coupon_kind} onChange={(e) => set({ coupon_kind: e.target.value as CouponKind })}>
-                <option value="percent">Percentual</option><option value="fixed">Valor fixo</option><option value="free_delivery">Frete grátis</option>
+              <select className="input" value={f.coupon_kind} onChange={(e) => set({ coupon_kind: e.target.value as MessageForm["coupon_kind"] })}>
+                <option value="percent">Desconto %</option><option value="fixed">Desconto em R$</option><option value="free_delivery">Entrega grátis</option>
               </select>
             </Field>
             {f.coupon_kind !== "free_delivery" && (
-              <Field label={f.coupon_kind === "percent" ? "Desconto (%)" : "Desconto (R$)"}>
+              <Field label={f.coupon_kind === "percent" ? "Percentual" : "Valor (R$)"}>
                 <input className="input" inputMode="decimal" value={f.coupon_value} onChange={(e) => set({ coupon_value: e.target.value })} />
               </Field>
             )}
-            <Field label="Pedido mínimo (R$)"><input className="input" inputMode="decimal" value={f.coupon_min} onChange={(e) => set({ coupon_min: e.target.value })} placeholder="0,00" /></Field>
+            <Field label="Pedido mínimo (R$)"><input className="input" inputMode="decimal" placeholder="0,00" value={f.coupon_min} onChange={(e) => set({ coupon_min: e.target.value })} /></Field>
             <Field label="Validade (dias)"><input className="input" type="number" min={1} max={90} value={f.coupon_valid_days} onChange={(e) => set({ coupon_valid_days: e.target.value })} /></Field>
           </div>
         )}
-        {f.coupon_mode !== "none" && !f.message.includes("{cupom}") && (
-          <p className="mt-2 text-xs text-amber-700">Dica: inclua {"{cupom}"} na mensagem para o cliente ver o código.</p>
-        )}
       </div>
 
-      <div>
-        <span className="label">Como enviar</span>
+      <div className="rounded-lg border border-zinc-200 p-3">
+        <p className="mb-2 text-sm font-medium">Como enviar</p>
         <div className="grid gap-2 sm:grid-cols-2">
-          <button type="button" onClick={() => set({ channel: "manual_links" })}
-            className={`rounded-lg border p-3 text-left text-sm ${f.channel === "manual_links" ? "border-brand-500 bg-brand-50" : "border-zinc-300 bg-white"}`}>
+          <label className={`cursor-pointer rounded-lg border p-3 text-sm ${f.channel === "manual_links" ? "border-brand-500 bg-brand-50" : "border-zinc-200"}`}>
+            <input type="radio" className="sr-only" checked={f.channel === "manual_links"} onChange={() => set({ channel: "manual_links" })} />
             <b className="font-medium">Manual pelo WhatsApp</b>
-            <span className="block text-xs text-zinc-500">Você envia um por um, pelo WhatsApp da loja. Funciona já, sem configurar nada.</span>
-          </button>
-          <button type="button" disabled={!apiReady} onClick={() => set({ channel: "whatsapp_api" })}
-            className={`rounded-lg border p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 ${f.channel === "whatsapp_api" ? "border-brand-500 bg-brand-50" : "border-zinc-300 bg-white"}`}>
+            <span className="block text-xs text-zinc-500">Você envia uma por uma pelo WhatsApp da loja, com a mensagem já pronta. Funciona hoje.</span>
+          </label>
+          <label className={`rounded-lg border p-3 text-sm ${!apiReady ? "cursor-not-allowed opacity-60" : "cursor-pointer"} ${f.channel === "whatsapp_api" ? "border-brand-500 bg-brand-50" : "border-zinc-200"}`}>
+            <input type="radio" className="sr-only" disabled={!apiReady} checked={f.channel === "whatsapp_api"} onChange={() => set({ channel: "whatsapp_api" })} />
             <b className="font-medium">API oficial do WhatsApp</b>
             <span className="block text-xs text-zinc-500">{apiReady ? "Envio automático com modelo aprovado pela Meta." : "Configure e ative na aba WhatsApp para usar."}</span>
-          </button>
+          </label>
         </div>
         {f.channel === "whatsapp_api" && (
-          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_120px]">
-            <Field label="Nome do modelo aprovado" hint="Exatamente como aparece no Gerenciador do WhatsApp (letras minúsculas, números e _).">
-              <input className="input font-mono" value={f.template_name} onChange={(e) => set({ template_name: e.target.value.toLowerCase() })} placeholder="volta_cupom" />
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Field label="Nome do modelo aprovado" hint="Exatamente como aparece no WhatsApp Manager.">
+              <input className="input font-mono" value={f.template_name} onChange={(e) => set({ template_name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "") })} placeholder="volta_cupom" />
             </Field>
             <Field label="Idioma"><input className="input" value={f.template_lang} onChange={(e) => set({ template_lang: e.target.value })} /></Field>
-            <div className="sm:col-span-2">
-              <span className="label">Variáveis do modelo, na ordem ({"{{1}}"}, {"{{2}}"}…)</span>
-              <div className="flex flex-wrap items-center gap-2">
-                {f.template_params.map((p, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs">
-                    {`{{${i + 1}}}`} = {PLACEHOLDERS.find((x) => x.key === p)?.label ?? p}
-                    <button type="button" className="text-zinc-500 hover:text-red-600" aria-label="Remover variável"
-                      onClick={() => set({ template_params: f.template_params.filter((_, j) => j !== i) })}>✕</button>
-                  </span>
-                ))}
-                <select className="input w-auto py-1 text-xs" value="" onChange={(e) => { if (e.target.value) set({ template_params: [...f.template_params, e.target.value] }); }}>
-                  <option value="">+ adicionar</option>
-                  {PLACEHOLDERS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-                </select>
+            <div>
+              <p className="label">Variáveis do modelo, na ordem</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PLACEHOLDERS.map((p) => {
+                  const i = f.template_params.indexOf(p.key);
+                  return (
+                    <button key={p.key} type="button" onClick={() => toggleParam(p.key)}
+                      className={`badge ${i >= 0 ? "bg-brand-600 text-white" : "bg-zinc-100 text-zinc-700"}`}>{i >= 0 ? `{{${i + 1}}} ` : ""}{p.label}</button>
+                  );
+                })}
               </div>
-              <p className="mt-1 text-xs text-zinc-500">Na API, a Meta envia o texto do modelo aprovado; a mensagem acima serve de referência e de prévia.</p>
+              <p className="mt-1 text-xs text-zinc-500">A mensagem acima vira só a prévia; a Meta envia o texto do modelo aprovado.</p>
             </div>
           </div>
         )}
       </div>
-    </fieldset>
+    </div>
   );
 }
-
-export const blankMessage = (message: string): MessageForm => ({
-  message, channel: "manual_links", template_name: "", template_lang: "pt_BR", template_params: ["nome", "cupom"],
-  coupon_mode: "none", coupon_kind: "percent", coupon_value: "10", coupon_min: "", coupon_valid_days: "7",
-});
