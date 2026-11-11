@@ -359,3 +359,100 @@ begin
   reset role;
 end $$;
 select 'FIDELIDADE OK' as resultado;
+-- ===== Estoque, Financeiro e Fiado =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; u uuid; pid uuid; si uuid; r jsonb; cust uuid; f jsonb; oid uuid; tb uuid; tab uuid;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  select id into pid from public.products where tenant_id = t limit 1;  -- 29,90
+  -- insumo + compra: 10 kg por R$ 200 => custo médio 2000/kg; depois 10 kg por R$ 300 => 2500/kg
+  insert into public.stock_items (tenant_id, unit_id, name, unit, min_qty) values (t, u, 'Mussarela', 'kg', 5) returning id into si;
+  begin update public.stock_items set qty = 999 where id = si; raise exception 'FALHA editou saldo direto';
+  exception when insufficient_privilege then null; end;
+  perform public.stock_move(si, 'purchase', 10, 20000, null, true);
+  r := public.stock_move(si, 'purchase', 10, 30000, 'NF 12', false);
+  if (r->>'qty')::numeric <> 20 or (r->>'cost_cents')::numeric <> 2500 then raise exception 'FALHA custo médio %', r; end if;
+  if (select count(*) from public.fin_entries where category = 'Compras de insumos' and amount_cents = 20000 and paid_at is not null) <> 1 then
+    raise exception 'FALHA despesa da compra'; end if;
+  begin perform public.stock_move(si, 'loss', 1, null, '', false); raise exception 'FALHA perda sem motivo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- ficha técnica: 0,2 kg por pizza; venda de 3 no PDV baixa 0,6
+  insert into public.product_recipes (product_id, stock_item_id, tenant_id, qty) values (pid, si, t, 0.2);
+  if not (public.cash_status(u)->>'open')::boolean then perform public.cash_open(u, 0); end if;
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 3)),
+       'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',8970))));
+  if (select qty from public.stock_items where id = si) <> 19.4 then raise exception 'FALHA baixa: %', (select qty from public.stock_items where id = si); end if;
+  -- cancelar devolve
+  oid := (r->>'order_id')::uuid;
+  perform public.set_order_status(oid, 'cancelled', 'teste estoque');
+  if (select qty from public.stock_items where id = si) <> 20 then raise exception 'FALHA devolução: %', (select qty from public.stock_items where id = si); end if;
+  -- contagem
+  perform public.stock_move(si, 'adjust', 18.5, null, 'inventário', false);
+  if (select qty from public.stock_items where id = si) <> 18.5 then raise exception 'FALHA contagem'; end if;
+
+  -- fiado: sem cliente / sem limite / acima do limite falham
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'items', jsonb_build_array(jsonb_build_object('product_id', pid)),
+       'payments', jsonb_build_array(jsonb_build_object('method','credit_account','amount_cents',2990)))); raise exception 'FALHA fiado sem cliente';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'customer', jsonb_build_object('name','Zé Fiado','phone','31966660001'),
+       'items', jsonb_build_array(jsonb_build_object('product_id', pid)),
+       'payments', jsonb_build_array(jsonb_build_object('method','credit_account','amount_cents',2990)))); raise exception 'FALHA fiado sem limite';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  insert into public.customers (tenant_id, name, phone) values (t, 'Zé Fiado', '31966660001') on conflict (tenant_id, phone) do nothing;
+  select id into cust from public.customers where tenant_id = t and phone = '31966660001';
+  begin update public.customers set credit_limit_cents = 999999, cashback_cents = 999999 where id = cust; raise exception 'FALHA editou saldos direto';
+  exception when insufficient_privilege then null; end;
+  perform public.credit_set_limit(cust, 5000);
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'customer', jsonb_build_object('name','Zé Fiado','phone','31966660001'),
+       'items', jsonb_build_array(jsonb_build_object('product_id', pid)),
+       'payments', jsonb_build_array(jsonb_build_object('method','credit_account','amount_cents',2990))));
+  if (select credit_balance_cents from public.customers where id = cust) <> 2990 then raise exception 'FALHA saldo fiado'; end if;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'customer', jsonb_build_object('name','Zé Fiado','phone','31966660001'),
+       'items', jsonb_build_array(jsonb_build_object('product_id', pid)),
+       'payments', jsonb_build_array(jsonb_build_object('method','credit_account','amount_cents',2990)))); raise exception 'FALHA estourou limite';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- fiado não entra no dinheiro esperado; recebimento em dinheiro entra
+  f := public.cash_status(u)->'expected';
+  if (f->>'credit_account')::int <> 2990 then raise exception 'FALHA caixa fiado %', f; end if;
+  begin perform public.credit_pay(cust, 5000, 'cash', u, null); raise exception 'FALHA recebeu a mais';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.credit_pay(cust, 1000, 'cash', u, null);
+  if ((public.cash_status(u)->'expected'->>'cash')::int - (f->>'cash')::int) <> 1000 then raise exception 'FALHA recebimento no caixa'; end if;
+  if (select credit_balance_cents from public.customers where id = cust) <> 1990 then raise exception 'FALHA saldo após receber'; end if;
+  -- cancelar a venda fiada estorna o que ainda é devido por ela (2990), sem deixar saldo negativo por conta do recebimento
+  perform public.credit_adjust(cust, 1000, 'reabre para teste');
+  perform public.set_order_status((r->>'order_id')::uuid, 'cancelled', 'teste fiado');
+  if (select credit_balance_cents from public.customers where id = cust) <> 0 then
+    raise exception 'FALHA estorno fiado: %', (select credit_balance_cents from public.customers where id = cust); end if;
+  -- mesa fechada no fiado
+  select id into tb from public.dining_tables where unit_id = u limit 1;
+  tab := public.tab_open(u, tb, 'fiado', 1, null);
+  perform public.tab_add_items(tab, jsonb_build_array(jsonb_build_object('product_id', pid)));
+  perform public.tab_close(tab, jsonb_build_array(jsonb_build_object('method','credit_account','amount_cents',2990)), false, 0, cust);
+  if (select credit_balance_cents from public.customers where id = cust) <> 2990 then raise exception 'FALHA mesa fiado'; end if;
+
+  -- financeiro
+  insert into public.fin_entries (tenant_id, unit_id, kind, description, category, amount_cents, due_date)
+  values (t, u, 'payable', 'Aluguel', 'Aluguel', 150000, current_date - 2), (t, null, 'receivable', 'Evento', 'Eventos', 40000, current_date + 5);
+  update public.fin_entries set paid_at = now(), paid_method = 'pix' where description = 'Evento';
+  f := public.fin_summary(t, u, current_date - 1, current_date + 1);
+  if (f->>'payable_overdue_cents')::int <> 150000 or (f->>'other_income_cents')::int <> 40000 or (f->>'expenses_cents')::int <> 20000
+     or (f->>'credit_open_cents')::int <> 2990 then raise exception 'FALHA resumo %', f; end if;
+  if (f->>'result_cents')::bigint <> (f->>'sales_cents')::bigint + (f->>'service_fee_cents')::bigint - (f->>'tab_discount_cents')::bigint + 40000 - 20000 then
+    raise exception 'FALHA resultado %', f; end if;
+  if (f->>'cmv_cents')::int <> 500 then raise exception 'FALHA cmv % (só a pizza da mesa: 0,2 kg x 25,00)', f->>'cmv_cents'; end if;
+end $$;
+-- cozinha não vê financeiro nem fiado, nem mexe em estoque
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+set request.jwt.claims = '{"aal":"aal1"}';
+do $$ begin
+  if (select count(*) from public.fin_entries) <> 0 or (select count(*) from public.credit_ledger) <> 0 then raise exception 'FALHA cozinha viu financeiro'; end if;
+  begin perform public.fin_summary(current_setting('test.a_tenant')::uuid, null, current_date, current_date); raise exception 'FALHA cozinha resumo';
+  exception when insufficient_privilege then null; end;
+  begin perform public.stock_move((select id from public.stock_items limit 1), 'adjust', 0, null, 'x', false); raise exception 'FALHA cozinha ajustou';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'GESTAO OK' as resultado;
