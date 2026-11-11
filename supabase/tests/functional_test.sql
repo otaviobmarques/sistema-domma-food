@@ -788,3 +788,127 @@ begin
 end $$;
 reset role;
 select 'ENTREGADORES OK' as resultado;
+-- ===== Impressão automática =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; t uuid; p uuid; pb uuid; tk text; pid uuid; r jsonb;
+begin
+  select id, tenant_id into u, t from public.units where slug = 'bella-massa';
+  insert into public.printers (tenant_id, unit_id, name, connection, address, stations, print_receipt) values (t, u, 'Cozinha', 'network', '192.168.0.50:9100', array['cozinha'], false) returning id into p;
+  insert into public.printers (tenant_id, unit_id, name, connection, stations, print_receipt, paper_width) values (t, u, 'Balcão', 'browser', '{}', true, 58) returning id into pb;
+  tk := public.print_agent_create(u, 'PC da cozinha');
+  perform set_config('test.ptoken', tk, false);
+  select id into pid from public.products where tenant_id = t limit 1;
+  if not (public.cash_status(u)->>'open')::boolean then perform public.cash_open(u, 0); end if;
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 2, 'notes', 'sem cebola')),
+       'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',5980))));
+  perform set_config('test.porder', r->>'order_id', false);
+  perform public.print_test(p);
+end $$;
+reset role;
+do $$ begin
+  -- gatilho adiado: os trabalhos aparecem depois do fim da transação do pedido
+  if (select count(*) from public.print_jobs where order_id = current_setting('test.porder')::uuid) <> 2 then
+    raise exception 'FALHA fila %', (select count(*) from public.print_jobs where order_id = current_setting('test.porder')::uuid); end if;
+  if (select content from public.print_jobs where order_id = current_setting('test.porder')::uuid and kind = 'kitchen') not like '%2x%OBS: sem cebola%' then
+    raise exception 'FALHA comanda %', (select content from public.print_jobs where order_id = current_setting('test.porder')::uuid and kind = 'kitchen'); end if;
+  if (select content from public.print_jobs where order_id = current_setting('test.porder')::uuid and kind = 'receipt') not like '%TOTAL%(PAGO)%' then raise exception 'FALHA via'; end if;
+end $$;
+set role anon;
+do $$ declare r jsonb; j jsonb;
+begin
+  begin perform public.print_agent_poll('dfp_' || repeat('0', 48)); raise exception 'FALHA token falso';
+  exception when insufficient_privilege then null; end;
+  r := public.print_agent_poll(current_setting('test.ptoken'), 'teste');
+  if jsonb_array_length(r->'jobs') <> 2 then raise exception 'FALHA poll %', r; end if;   -- comanda + teste (a via é do navegador)
+  for j in select * from jsonb_array_elements(r->'jobs') loop perform public.print_agent_done(current_setting('test.ptoken'), (j->>'id')::bigint, true); end loop;
+  if jsonb_array_length(public.print_agent_poll(current_setting('test.ptoken'))->'jobs') <> 0 then raise exception 'FALHA repetiu'; end if;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; b jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  b := public.print_browser_claim(u);
+  if jsonb_array_length(b) <> 1 then raise exception 'FALHA navegador %', b; end if;
+  perform public.print_browser_done((b->0->>'id')::bigint, true);
+  if public.print_reprint(current_setting('test.porder')::uuid) <> 2 then raise exception 'FALHA reimpressão'; end if;
+end $$;
+reset role;
+select 'IMPRESSAO OK' as resultado;
+
+-- ===== Marketing =====
+do $$ declare t uuid;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  update public.customers set opt_in_marketing = true, last_order_at = now() - interval '45 days', birthday = (now() at time zone 'America/Sao_Paulo')::date - interval '30 years'
+   where tenant_id = t and phone in ('31988771122', '31944440001');
+  update public.customers set opt_in_marketing = false where tenant_id = t and phone not in ('31988771122', '31944440001');
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare t uuid; c uuid; r jsonb; a uuid;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  if (public.campaign_audience_count(t, '{"type":"inactive","days":30}')->>'eligible')::int <> 2 then raise exception 'FALHA público %', public.campaign_audience_count(t, '{"type":"inactive","days":30}'); end if;
+  begin perform public.campaign_save(null, t, '{"name":"API sem modelo","channel":"whatsapp_api","message":"Oi {nome}"}'::jsonb); raise exception 'FALHA sem modelo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  c := public.campaign_save(null, t, jsonb_build_object('name','Volta logo','segment', '{"type":"inactive","days":30}'::jsonb,
+        'message','Oi {nome}! Sentimos sua falta na {loja}. Use o cupom {cupom}: {link}', 'coupon_mode','unique','coupon_value',15));
+  r := public.campaign_launch(c);
+  if (r->>'messages')::int <> 2 then raise exception 'FALHA disparo %', r; end if;
+  if (select count(*) from public.coupons where tenant_id = t and code like 'DOMMA%' and max_uses = 1) <> 2 then raise exception 'FALHA cupons únicos'; end if;
+  if (select body from public.campaign_messages where campaign_id = c limit 1) not like 'Oi %! Sentimos sua falta na Bella Massa%DOMMA%/loja/bella-massa' then
+    raise exception 'FALHA texto %', (select body from public.campaign_messages where campaign_id = c limit 1); end if;
+  perform public.campaign_message_mark((select id from public.campaign_messages where campaign_id = c order by id limit 1), true);
+  -- limite de frequência: nova campanha não pega quem acabou de receber
+  if (public.campaign_audience_count(t, '{"type":"inactive","days":30}')->>'eligible')::int <> 0 then raise exception 'FALHA frequência'; end if;
+  -- automação de aniversário (canal manual)
+  a := public.campaign_save(null, t, jsonb_build_object('name','Aniversário','kind','birthday','segment','{"type":"birthday_today"}'::jsonb,
+        'message','Feliz aniversário, {nome}! Presente: {cupom}','coupon_mode','shared','coupon_kind','free_delivery','active',true));
+  perform set_config('test.camp', c::text, false);
+  perform set_config('test.auto', a::text, false);
+end $$;
+reset role;
+do $$ declare n int; t uuid;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  update public.campaigns set status = 'active' where id = current_setting('test.auto')::uuid;
+  update public.marketing_settings set frequency_days = 1 where tenant_id = t;
+  insert into public.marketing_settings (tenant_id, frequency_days) values (t, 1) on conflict (tenant_id) do update set frequency_days = 1;
+  delete from public.campaign_messages where campaign_id = current_setting('test.camp')::uuid and status = 'manual_pending';
+  update public.campaign_messages set created_at = now() - interval '2 days' where campaign_id = current_setting('test.camp')::uuid;
+  n := private.marketing_daily();
+  if n <> 2 then raise exception 'FALHA aniversário %', n; end if;
+  if private.marketing_daily() <> 0 then raise exception 'FALHA aniversário repetido'; end if;
+  -- conversão: cliente que recebeu e pediu
+  update public.campaign_messages set status = 'manual_done', sent_at = now() where campaign_id = current_setting('test.auto')::uuid;
+end $$;
+set role anon;
+do $$ declare r jsonb;
+begin
+  r := public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+        'customer', jsonb_build_object('name','Ana Paula','phone','31988771122','birthday','1990-05-17'),
+        'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1))));
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  if (select count(*) from public.campaign_messages where campaign_id = current_setting('test.auto')::uuid and converted_order_id is not null) <> 1 then raise exception 'FALHA conversão'; end if;
+  if public.marketing_inbound(t, '5531944440001', 'sair') is not true then raise exception 'FALHA SAIR'; end if;
+  if (select opt_in_marketing from public.customers where tenant_id = t and phone = '31944440001') then raise exception 'FALHA opt-out'; end if;
+  if public.marketing_inbound(t, '5531988771122', 'Quero uma pizza') then raise exception 'FALHA mensagem comum virou opt-out'; end if;
+  if (select birthday from public.customers where tenant_id = t and phone = '31988771122') is null then raise exception 'FALHA aniversário salvo'; end if;
+end $$;
+set request.jwt.claims = '{"role":"anon"}';
+do $$ begin
+  begin perform public.marketing_jobs(1); raise exception 'FALHA anon fila'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'MARKETING OK' as resultado;
