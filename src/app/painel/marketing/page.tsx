@@ -8,10 +8,11 @@ import { Campaigns } from "./campaigns";
 import { Automations } from "./automations";
 import { WhatsAppSettings } from "./settings";
 import { StatusNotices } from "./status";
+import { TrackingSettings } from "./tracking";
 import type { Settings } from "./shared";
 
-type Tab = "campaigns" | "automations" | "status" | "whatsapp";
-const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["status", "Avisos de pedido"], ["whatsapp", "WhatsApp"]];
+type Tab = "campaigns" | "automations" | "status" | "tracking" | "whatsapp";
+const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["status", "Avisos de pedido"], ["tracking", "Anúncios e métricas"], ["whatsapp", "WhatsApp"]];
 
 export default function Marketing() {
   const { tenantId, role } = usePanel();
@@ -33,7 +34,7 @@ export default function Marketing() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="h1">Marketing e WhatsApp</h1>
+        <h1 className="h1">Marketing</h1>
         <p className="mt-1 max-w-3xl text-sm text-zinc-600">
           Chame de volta quem sumiu, parabenize aniversariantes e mande cupons. Só recebem clientes que autorizaram ofertas no pedido.
           O envio manual pelo WhatsApp da loja funciona hoje; o envio automático usa a API oficial do WhatsApp, que depende da aprovação da Meta.
@@ -49,6 +50,7 @@ export default function Marketing() {
       {loaded && tab === "campaigns" && <Campaigns apiReady={apiReady} />}
       {loaded && tab === "automations" && <Automations apiReady={apiReady} freqDays={s?.frequency_days ?? 7} />}
       {loaded && tab === "status" && <StatusNotices />}
+      {loaded && tab === "tracking" && <TrackingSettings />}
       {loaded && tab === "whatsapp" && <WhatsAppSettings settings={s} onChanged={load} />}
     </div>
   );

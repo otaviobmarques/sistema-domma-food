@@ -1,3 +1,4 @@
+import type { Tracking } from "@/lib/tracking";
 export type StoreOption = { id: string; name: string; description: string | null; price_cents: number };
 export type StoreGroup = {
   id: string; name: string; min: number; max: number; allow_repeat: boolean;
@@ -20,6 +21,7 @@ export type StoreUnit = {
   accepts_delivery: boolean; accepts_pickup: boolean; accepts_scheduling: boolean; min_order_cents: number;
   prep_time_min: number; pickup_time_min: number; accepted_payments: string[];
   gateway?: StoreGateway | null;
+  tracking?: Tracking | null;
 };
 export type StoreGateway = { provider: string; pix: boolean; card: boolean; public_key: string; max_installments: number };
 export type Store = { unit: StoreUnit; zones: StoreZone[]; menu: StoreCategory[] };

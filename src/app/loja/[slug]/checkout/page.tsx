@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { use, useEffect, useMemo, useRef, useState } from "react";
+import { funnel, trackEvent, type TrackItem } from "@/lib/tracking";
+import { ConsentBanner } from "@/components/store/consent";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { brl, formatPhone, onlyDigits, parseBRL, PAYMENT_LABEL } from "@/lib/format";
@@ -84,6 +86,16 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     try { setEmail(localStorage.getItem(EMAIL_KEY) ?? ""); } catch { /* ignora */ }
   }, [slug]);
 
+  // início do checkout (uma vez por sessão no funil; para Pixel/GA a cada abertura)
+  const trackItems: TrackItem[] = useMemo(() => cart.items.map((i) => ({ id: i.product_id, name: i.name, price_cents: i.unit_price_cents, quantity: i.quantity })), [cart.items]);
+  const checkoutSent = useRef(false);
+  useEffect(() => {
+    if (!store || !cart.ready || !trackItems.length || checkoutSent.current) return;
+    checkoutSent.current = true;
+    funnel(slug, "checkout");
+    trackEvent(store.unit.tracking, { name: "begin_checkout", items: trackItems });
+  }, [store, cart.ready, trackItems, slug]);
+
   const neighborhoods = useMemo(() => [...new Set((store?.zones ?? []).filter((z) => z.kind === "neighborhood").flatMap((z) => z.neighborhoods))].sort(), [store]);
 
   const payload = useMemo(() => ({
@@ -145,6 +157,9 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
         sessionStorage.setItem(`df_pay_email_${(data as { token: string }).token}`, email.trim().toLowerCase());
       } catch { /* ignora */ }
     }
+    const placed = data as { order_id: string; total_cents: number };
+    funnel(slug, "order", placed.total_cents);
+    trackEvent(store?.unit.tracking, { name: "purchase", items: trackItems, value_cents: placed.total_cents, order_id: placed.order_id });
     cart.clear();
     router.replace(`/pedido/${(data as { token: string }).token}`);
   }
@@ -342,6 +357,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
           </button>
         </div>
       </form>
+      <ConsentBanner tracking={u.tracking} color={color} />
     </main>
   );
 }
