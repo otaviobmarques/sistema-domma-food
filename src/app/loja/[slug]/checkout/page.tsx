@@ -17,6 +17,8 @@ type Quote = {
 type Address = { street: string; number: string; complement: string; neighborhood: string; city: string; reference: string };
 const EMPTY_ADDR: Address = { street: "", number: "", complement: "", neighborhood: "", city: "", reference: "" };
 const PROFILE_KEY = "df_customer";
+const EMAIL_KEY = "df_payer_email";
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,}$/i;
 
 function loadProfile(): { name?: string; phone?: string; address?: Address } {
   try { return JSON.parse(localStorage.getItem(PROFILE_KEY) ?? "{}") ?? {}; } catch { return {}; }
@@ -49,6 +51,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   const [loyalty, setLoyalty] = useState<LoyaltyInfo | null>(null);
   const [useCashback, setUseCashback] = useState(false);
   const [deviceToken, setDevice] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
   const phoneDigits = onlyDigits(phone);
 
   useEffect(() => { setDevice(getDeviceToken(slug)); }, [slug]);
@@ -76,6 +79,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     if (p.name) setName(p.name);
     if (p.phone) setPhone(formatPhone(p.phone));
     if (p.address) setAddr({ ...EMPTY_ADDR, ...p.address });
+    try { setEmail(localStorage.getItem(EMAIL_KEY) ?? ""); } catch { /* ignora */ }
   }, [slug]);
 
   const neighborhoods = useMemo(() => [...new Set((store?.zones ?? []).filter((z) => z.kind === "neighborhood").flatMap((z) => z.neighborhoods))].sort(), [store]);
@@ -123,6 +127,8 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     e.preventDefault();
     setSubmitErr("");
     if (onlyDigits(phone).length < 10) { setSubmitErr("Informe um WhatsApp válido com DDD."); return; }
+    const onlinePay = payment === "online_card" || (payment === "pix" && !!store?.unit.gateway?.pix);
+    if (onlinePay && !EMAIL_RE.test(email.trim())) { setSubmitErr("Informe um e-mail válido para o pagamento online."); return; }
     setBusy(true);
     const { data, error } = await supabaseBrowser().rpc("place_order", { p: payload });
     if (error) { setBusy(false); setSubmitErr(error.message); return; }
@@ -130,6 +136,12 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
       localStorage.setItem(PROFILE_KEY, JSON.stringify({ name: name.trim(), phone: onlyDigits(phone), address: addr }));
     } catch { /* ignora */ }
     setDeviceToken(slug, (data as { device_token?: string }).device_token);
+    if (onlinePay) {
+      try {
+        localStorage.setItem(EMAIL_KEY, email.trim().toLowerCase());
+        sessionStorage.setItem(`df_pay_email_${(data as { token: string }).token}`, email.trim().toLowerCase());
+      } catch { /* ignora */ }
+    }
     cart.clear();
     router.replace(`/pedido/${(data as { token: string }).token}`);
   }
@@ -226,11 +238,18 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
             {u.accepted_payments.map((m) => (
               <label key={m} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 text-sm font-medium transition ${payment === m ? "ring-2" : "border-zinc-200 hover:border-zinc-300"}`} style={payment === m ? { borderColor: color, ["--tw-ring-color" as string]: `${color}33`, background: `${color}08` } : undefined}>
                 <input type="radio" name="pay" className="accent-brand-600" checked={payment === m} onChange={() => setPayment(m)} />
-                {PAYMENT_LABEL[m] ?? m}
+                {m === "online_card" ? "Cartão de crédito (online)" : m === "pix" && u.gateway?.pix ? "Pix (confirmação automática)" : PAYMENT_LABEL[m] ?? m}
                 {m === "pix" && <span className="text-xs text-zinc-500">· QR Code na próxima tela</span>}
+                {m === "online_card" && <span className="text-xs text-zinc-500">· pague na próxima tela</span>}
               </label>
             ))}
           </div>
+          {(payment === "online_card" || (payment === "pix" && u.gateway?.pix)) && (
+            <Field label="E-mail (para o comprovante do Mercado Pago)">
+              <input className="input" type="email" required autoComplete="email" inputMode="email" maxLength={254}
+                value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
+            </Field>
+          )}
           {payment === "cash" && (
             <Field label="Troco para quanto?" hint="Deixe vazio se não precisar de troco.">
               <input className="input" inputMode="decimal" placeholder="Ex.: 100,00" value={changeFor} onChange={(e) => setChangeFor(e.target.value)} />

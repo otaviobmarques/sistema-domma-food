@@ -64,3 +64,12 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - Emissão automática (opcional): PDV na venda, delivery/retirada ao concluir pago, mesa ao fechar a conta. Marketplaces ficam de fora por padrão.
 - Para produção, cada CNPJ precisa: conta no provedor, certificado A1, CSC da SEFAZ e inscrição estadual habilitada. NCM/CFOP/CSOSN devem ser conferidos pelo contador.
 - Teste de ponta a ponta (11/11/2026): com token inválido em homologação a Focus respondeu "Access token inválido" e a nota ficou como rejeitada, com reenvio disponível.
+
+## Pagamento online (Mercado Pago)
+
+- Cada loja conecta a própria conta Mercado Pago (Public Key, Access Token e assinatura secreta do webhook). O dinheiro cai na conta da loja; as tarifas são do Mercado Pago. Token e assinatura ficam no Vault.
+- Edge Function `payments`: `/pix` e `/card` criam o pagamento em `POST /v1/payments` com `X-Idempotency-Key`; o valor sempre vem do pedido no banco. O cartão é tokenizado pelo Card Payment Brick no navegador, então os dados do cartão não passam pelo nosso servidor.
+- Webhook `/payments/webhook?unit=<id>`: valida `x-signature` (HMAC-SHA256 do manifesto `id:...;request-id:...;ts:...;`) e, mesmo assim, consulta o pagamento no Mercado Pago antes de mudar qualquer coisa. Rede de segurança: a página do pedido consulta o status e o cron confere pendentes a cada minuto.
+- Valor aprovado diferente do pedido não confirma. Pagamento aprovado com pedido cancelado ou já pago gera estorno automático. Cancelar um pedido pago online estorna sozinho (`POST /v1/payments/{id}/refunds`), com novas tentativas.
+- O Pix do Mercado Pago precisa ter pelo menos 30 minutos de validade. Se o cliente pagar depois de o pedido expirar, o valor é estornado automaticamente.
+- Teste de ponta a ponta (12/11/2026, credenciais falsas): o Mercado Pago real recusou o token; o webhook recusou a assinatura forjada (401); o Pix mostrou o erro do provedor; a política de segurança da página do pedido não bloqueia nada do SDK.

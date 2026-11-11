@@ -26,7 +26,7 @@ export const slugify = (s: string) =>
     .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
 
 export const STATUS_LABEL: Record<string, string> = {
-  awaiting_payment: "Aguardando Pix",
+  awaiting_payment: "Aguardando pagamento",
   pending: "Aguardando aceite",
   preparing: "Em preparo",
   ready: "Pronto",
