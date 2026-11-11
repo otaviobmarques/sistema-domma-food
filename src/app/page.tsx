@@ -68,9 +68,9 @@ const STEPS = [
 
 const PLANS = [
   { name: "Essencial", price: "149", for: "Para quem está começando no delivery", items: ["Cardápio digital próprio", "Gestor de pedidos em tempo real", "Pix com QR Code na hora", "Cupons de desconto", "Dashboard"], hl: false, soon: "" },
-  { name: "Delivery", price: "229", for: "Operação focada em entrega", items: ["Tudo do Essencial", "Áreas de entrega por raio e bairro", "Clientes e CRM", "Integração 99Food, Keeta e aiqfome", "Relatórios de vendas"], hl: false, soon: "" },
-  { name: "Completo", price: "389", for: "Operação completa e redes", items: ["Tudo do Delivery", "Até 3 lojas", "Auditoria e 2FA para a equipe", "Prioridade no suporte", "Novos módulos sem custo extra"], hl: true, soon: "" },
-  { name: "Salão", price: "229", for: "Restaurante com mesas", items: ["Tudo do Essencial", "Mesas e comandas", "App do garçom", "QR Code na mesa", "KDS (monitor de cozinha)"], hl: false, soon: "Módulos de salão em breve" },
+  { name: "Delivery", price: "229", for: "Operação focada em entrega", items: ["Tudo do Essencial", "Áreas de entrega por raio e bairro", "Clientes, cashback e pontos", "Integração 99Food, Keeta e aiqfome", "Relatórios de vendas"], hl: false, soon: "" },
+  { name: "Completo", price: "389", for: "Operação completa e redes", items: ["Tudo do Delivery e do Salão", "Até 3 lojas", "Auditoria e 2FA para a equipe", "Prioridade no suporte", "Novos módulos sem custo extra"], hl: true, soon: "" },
+  { name: "Salão", price: "229", for: "Restaurante com mesas", items: ["Tudo do Essencial", "Mesas e comandas", "Caixa e PDV de balcão", "KDS (monitor de cozinha)", "Taxa de serviço e divisão da conta"], hl: false, soon: "" },
 ];
 
 const FAQ = [
