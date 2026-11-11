@@ -44,6 +44,7 @@ export const PAYMENT_LABEL: Record<string, string> = {
   online_card: "Cartão online",
   credit_card: "Crédito",
   debit_card: "Débito",
+  credit_account: "Fiado",
 };
 
 export const TYPE_LABEL: Record<string, string> = {

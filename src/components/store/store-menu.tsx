@@ -7,6 +7,7 @@ import { effectivePrice, useCart } from "./cart";
 import { ProductModal, Stepper } from "./product-modal";
 import type { Store, StoreProduct } from "./types";
 import { storeColor } from "./brand";
+import { LoyaltyBanner, RatingChip, useStoreExtras } from "./loyalty";
 
 const TAG_LABEL: Record<string, string> = { novo: "Novo", vegano: "Vegano", picante: "Picante", vegetariano: "Vegetariano", "sem-gluten": "Sem glúten" };
 
@@ -18,6 +19,7 @@ export function StoreMenu({ store }: { store: Store }) {
   const [open, setOpen] = useState<StoreProduct | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const { loyalty, reviews } = useStoreExtras(unit.slug);
 
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const filtered = useMemo(() => {
@@ -68,6 +70,7 @@ export function StoreMenu({ store }: { store: Store }) {
           <h1 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">{unit.name}</h1>
           {unit.description && <p className="mt-1 text-sm leading-relaxed text-zinc-600">{unit.description}</p>}
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <RatingChip reviews={reviews} storeName={unit.name} />
             {unit.accepts_delivery && minEta != null && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 font-semibold text-zinc-700">
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
@@ -89,6 +92,7 @@ export function StoreMenu({ store }: { store: Store }) {
             {unit.min_order_cents > 0 && <span className="rounded-full bg-zinc-100 px-3 py-1.5 font-semibold text-zinc-700">Mínimo {brl(unit.min_order_cents)}</span>}
             {(unit.neighborhood || unit.city) && <span className="rounded-full bg-zinc-100 px-3 py-1.5 font-semibold text-zinc-700">{[unit.neighborhood, unit.city].filter(Boolean).join(" · ")}</span>}
           </div>
+          <LoyaltyBanner loyalty={loyalty} color={color} />
           {!unit.is_open && (
             <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
               A loja está fechada agora.{unit.accepts_scheduling ? " Você pode montar seu pedido e agendar para mais tarde." : " Volte no horário de funcionamento."}

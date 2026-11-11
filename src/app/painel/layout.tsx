@@ -40,7 +40,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       userId: user.id, email: user.email ?? "", tenantId: unit.tenant_id, tenantName: tenant?.name ?? "",
       role: m.role as Role, unit, units: units as PanelUnit[],
     }}>
-      <div className="min-h-screen bg-cream lg:flex">
+      <div className="min-h-screen bg-zinc-50 lg:flex">
         <Sidebar />
         <div className="min-w-0 flex-1">
           {tenant?.status === "trial" && (
@@ -49,7 +49,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
               Aproveite todos os recursos até {new Date(tenant.trial_ends_at).toLocaleDateString("pt-BR")}.
             </div>
           )}
-          <main className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8">{children}</main>
+          <main className="mx-auto max-w-[1400px] p-4 sm:p-6">{children}</main>
         </div>
       </div>
     </PanelProvider>

@@ -8,8 +8,12 @@ import { Alert, Field } from "@/components/ui";
 import { useCart } from "@/components/store/cart";
 import type { Store } from "@/components/store/types";
 import { storeColor } from "@/components/store/brand";
+import { fetchLoyalty, getDeviceToken, setDeviceToken, type LoyaltyInfo } from "@/components/store/loyalty";
 
-type Quote = { subtotal_cents: number; delivery_fee_cents: number; discount_cents: number; total_cents: number; eta_min: number; coupon_code: string | null };
+type Quote = {
+  subtotal_cents: number; delivery_fee_cents: number; discount_cents: number; total_cents: number; eta_min: number; coupon_code: string | null;
+  cashback_available?: number; cashback_applied?: number; cashback_blocked?: string | null; cashback_earn?: number; points_earn?: number;
+};
 type Address = { street: string; number: string; complement: string; neighborhood: string; city: string; reference: string };
 const EMPTY_ADDR: Address = { street: "", number: "", complement: "", neighborhood: "", city: "", reference: "" };
 const PROFILE_KEY = "df_customer";
@@ -42,6 +46,21 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   const [submitErr, setSubmitErr] = useState("");
   const [busy, setBusy] = useState(false);
   const reqId = useRef(0);
+  const [loyalty, setLoyalty] = useState<LoyaltyInfo | null>(null);
+  const [useCashback, setUseCashback] = useState(false);
+  const [deviceToken, setDevice] = useState<string | null>(null);
+  const phoneDigits = onlyDigits(phone);
+
+  useEffect(() => { setDevice(getDeviceToken(slug)); }, [slug]);
+  // Fidelidade: consulta quando o telefone está completo
+  useEffect(() => {
+    if (phoneDigits.length < 10) { setLoyalty(null); return; }
+    let alive = true;
+    const t = setTimeout(() => { fetchLoyalty(slug, phoneDigits).then((l) => { if (alive) setLoyalty(l); }); }, 400);
+    return () => { alive = false; clearTimeout(t); };
+  }, [slug, phoneDigits]);
+  const cashbackBalance = loyalty?.cashback_enabled && loyalty.known_device ? loyalty.cashback_cents ?? 0 : 0;
+  const wantsCashback = useCashback && cashbackBalance > 0;
 
   useEffect(() => {
     supabaseBrowser().rpc("get_store", { p_slug: slug }).then(({ data }: { data: Store | null }) => {
@@ -69,9 +88,11 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     change_for_cents: payment === "cash" && changeFor ? parseBRL(changeFor) : null,
     notes: notes.trim() || null,
     scheduled_for: schedule && when ? new Date(when).toISOString() : null,
+    use_cashback: wantsCashback,
+    device_token: deviceToken,
     items: cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity, notes: i.notes || null,
       options: i.options.map((o) => ({ option_id: o.option_id, quantity: o.quantity })) })),
-  }), [slug, type, payment, name, phone, optIn, addr, geo, coupon, changeFor, notes, schedule, when, cart.items]);
+  }), [slug, type, payment, name, phone, optIn, addr, geo, coupon, changeFor, notes, schedule, when, cart.items, wantsCashback, deviceToken]);
 
   // Cotação ao vivo (servidor recalcula tudo)
   useEffect(() => {
@@ -108,6 +129,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     try {
       localStorage.setItem(PROFILE_KEY, JSON.stringify({ name: name.trim(), phone: onlyDigits(phone), address: addr }));
     } catch { /* ignora */ }
+    setDeviceToken(slug, (data as { device_token?: string }).device_token);
     cart.clear();
     router.replace(`/pedido/${(data as { token: string }).token}`);
   }
@@ -216,6 +238,28 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
           )}
         </section>
 
+        {loyalty?.cashback_enabled && phoneDigits.length >= 10 && (
+          <section className="card space-y-2" aria-live="polite">
+            <h2 className="text-base font-extrabold">Cashback</h2>
+            {cashbackBalance > 0 ? (
+              <label className="flex cursor-pointer items-center justify-between gap-3 text-sm font-medium">
+                <span>Usar meu cashback <span className="text-zinc-500">({brl(cashbackBalance)} disponível)</span></span>
+                <input type="checkbox" role="switch" className="h-5 w-5 accent-brand-600" checked={useCashback} onChange={(e) => setUseCashback(e.target.checked)} />
+              </label>
+            ) : loyalty.known_device ? (
+              <p className="text-sm text-zinc-600">Você ainda não tem saldo. Este pedido já rende cashback para o próximo.</p>
+            ) : (
+              <p className="text-sm text-zinc-600">Seu cashback fica disponível para uso neste aparelho a partir do próximo pedido.</p>
+            )}
+            {wantsCashback && quote?.cashback_blocked === "coupon" && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-200">Cashback não acumula com cupom nesta loja.</p>
+            )}
+            {wantsCashback && loyalty.cashback_max_use_pct != null && loyalty.cashback_max_use_pct < 90 && (
+              <p className="text-xs text-zinc-500">Dá para pagar até {loyalty.cashback_max_use_pct}% do pedido com cashback.</p>
+            )}
+          </section>
+        )}
+
         <section className="card space-y-3">
           <Field label="Cupom de desconto"><input className="input uppercase" maxLength={30} value={coupon} onChange={(e) => setCoupon(e.target.value.toUpperCase())} /></Field>
           <Field label="Observações do pedido"><textarea className="input" rows={2} maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
@@ -238,8 +282,17 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
               <div className="flex justify-between"><span>Subtotal</span><span>{brl(quote.subtotal_cents)}</span></div>
               {type === "delivery" && <div className="flex justify-between"><span>Entrega</span><span>{quote.delivery_fee_cents ? brl(quote.delivery_fee_cents) : "Grátis"}</span></div>}
               {quote.discount_cents > 0 && <div className="flex justify-between text-green-700"><span>Desconto {quote.coupon_code ? `(${quote.coupon_code})` : ""}</span><span>− {brl(quote.discount_cents)}</span></div>}
+              {(quote.cashback_applied ?? 0) > 0 && <div className="flex justify-between text-green-700"><span>Cashback</span><span>− {brl(quote.cashback_applied)}</span></div>}
               <div className="flex justify-between pt-2 text-lg font-black"><span>Total</span><span style={{ color }}>{brl(quote.total_cents)}</span></div>
               {quote.eta_min > 0 && <p className="pt-1 text-xs text-zinc-500">Tempo estimado: {quote.eta_min} min</p>}
+              {((quote.cashback_earn ?? 0) > 0 || (quote.points_earn ?? 0) > 0) && (
+                <p className="mt-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200">
+                  {(quote.cashback_earn ?? 0) > 0 && <>Você vai ganhar {brl(quote.cashback_earn)} de cashback</>}
+                  {(quote.cashback_earn ?? 0) > 0 && (quote.points_earn ?? 0) > 0 && " e "}
+                  {(quote.points_earn ?? 0) > 0 && <>+{quote.points_earn} pontos</>}
+                  {" "}quando o pedido for concluído.
+                </p>
+              )}
             </>
           ) : (
             <p className="text-zinc-500">{quoting ? "Calculando..." : "Preencha os dados para ver o total."}</p>

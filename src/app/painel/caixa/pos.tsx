@@ -5,7 +5,8 @@ import { usePanel } from "@/lib/panel/context";
 import { Alert } from "@/components/ui";
 import { brl, centsToInput, errorMessage, formatPhone, onlyDigits, parseBRL } from "@/lib/format";
 import { linesToPayload, linesTotal, ProductPicker, usePosCatalog, type PosLine } from "@/components/pos/product-picker";
-import { METHOD_LABEL, METHODS, type Method } from "./types";
+import { METHOD_LABEL, PAY_METHODS, type PayMethod as Method } from "./types";
+import { CreditInfo, creditAvailable, useCreditCustomer } from "@/components/pos/credit-info";
 import { printReceipt, type Receipt } from "./receipt";
 
 type Pay = { key: string; method: Method; value: string };
@@ -36,7 +37,10 @@ export function Pos({ onSold }: { onSold: () => void }) {
   const cashPaid = pays.filter((p) => p.method === "cash").reduce((s, p) => s + parseBRL(p.value), 0);
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
-  const canFinish = lines.length > 0 && paid >= total && change <= cashPaid && pays.every((p) => parseBRL(p.value) > 0) && pays.length > 0 && !busy;
+  const creditAmt = pays.filter((p) => p.method === "credit_account").reduce((s, p) => s + parseBRL(p.value), 0);
+  const creditCust = useCreditCustomer(tenantId, phone, creditAmt > 0 || pays.some((p) => p.method === "credit_account"));
+  const creditOk = creditAmt === 0 || (!!creditCust && creditAvailable(creditCust) >= creditAmt);
+  const canFinish = creditOk && lines.length > 0 && paid >= total && change <= cashPaid && pays.every((p) => parseBRL(p.value) > 0) && pays.length > 0 && !busy;
 
   const addLine = useCallback((l: PosLine) => {
     setErr("");
@@ -90,13 +94,13 @@ export function Pos({ onSold }: { onSold: () => void }) {
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-green-100 text-2xl text-green-700">✓</div>
         <div>
           <p className="text-sm text-zinc-500">Venda registrada</p>
-          <p className="text-3xl font-extrabold">Pedido #{done.number}</p>
+          <p className="text-3xl font-semibold">Pedido #{done.number}</p>
           <p className="mt-1 text-sm text-zinc-600">Total {brl(done.total)} · enviado para a cozinha</p>
         </div>
         {done.change > 0 && (
           <div className="rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
             <p className="text-sm font-semibold text-amber-900">Troco</p>
-            <p className="text-4xl font-extrabold tabular-nums text-amber-900">{brl(done.change)}</p>
+            <p className="text-4xl font-semibold tabular-nums text-amber-900">{brl(done.change)}</p>
           </div>
         )}
         <div className="flex gap-2">
@@ -162,13 +166,13 @@ export function Pos({ onSold }: { onSold: () => void }) {
         <dl className="space-y-0.5 border-t border-zinc-200 pt-2 text-sm">
           <div className="flex justify-between"><dt className="text-zinc-500">Subtotal</dt><dd className="tabular-nums">{brl(subtotal)}</dd></div>
           {discount > 0 && <div className="flex justify-between text-green-700"><dt>Desconto</dt><dd className="tabular-nums">− {brl(discount)}</dd></div>}
-          <div className="flex justify-between text-lg font-extrabold"><dt>Total</dt><dd className="tabular-nums">{brl(total)}</dd></div>
+          <div className="flex justify-between text-lg font-semibold"><dt>Total</dt><dd className="tabular-nums">{brl(total)}</dd></div>
         </dl>
 
         <div>
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500">Pagamento</p>
-          <div className="grid grid-cols-5 gap-1.5">
-            {METHODS.map((m) => (
+          <div className="grid grid-cols-3 gap-1.5">
+            {PAY_METHODS.map((m) => (
               <button key={m} type="button" disabled={!lines.length} onClick={() => addPay(m)}
                 className="rounded-lg border border-zinc-300 bg-white px-1 py-2 text-xs font-semibold hover:border-brand-500 hover:text-brand-700 disabled:opacity-40">
                 {METHOD_LABEL[m]}
@@ -192,6 +196,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
                 : <><span className="text-green-700">Valor exato</span><span className="text-green-700">✓</span></>}
             </div>
           )}
+          {pays.some((p) => p.method === "credit_account") && <div className="mt-1.5"><CreditInfo customer={creditCust} phone={phone} amount={creditAmt} /></div>}
           {change > cashPaid && <p className="mt-1 text-xs text-red-700">Só é possível dar troco sobre o valor em dinheiro.</p>}
         </div>
 

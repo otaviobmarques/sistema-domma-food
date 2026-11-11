@@ -6,6 +6,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { brl, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM } from "@/lib/format";
 import { pixPayload } from "@/lib/pix";
 import { storeColor } from "@/components/store/brand";
+import { StarInput, Stars } from "@/components/store/loyalty";
 
 type Order = {
   number: number; status: string; type: "delivery" | "pickup" | "dine_in"; customer_name: string;
@@ -19,6 +20,11 @@ type Order = {
   events: { status: string; at: string }[];
 };
 
+type Extras = {
+  can_review: boolean; review: { rating: number; comment: string | null; reply: string | null } | null;
+  cashback_used_cents: number; cashback_earned_cents: number; points_earned: number;
+};
+
 const FINAL = ["completed", "cancelled"];
 
 export default function OrderPage({ params }: { params: Promise<{ token: string }> }) {
@@ -27,6 +33,31 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
   const [qr, setQr] = useState("");
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [extras, setExtras] = useState<Extras | null>(null);
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+  const [reviewErr, setReviewErr] = useState("");
+  const [thanks, setThanks] = useState(false);
+
+  const loadExtras = useCallback(async () => {
+    const { data } = await supabaseBrowser().rpc("order_extras", { p_token: token });
+    if (data) setExtras(data as Extras);
+  }, [token]);
+  const status = order?.status;
+  // cashback e avaliação: ao abrir e quando o pedido muda de etapa (ex.: concluído)
+  useEffect(() => { if (status) loadExtras(); }, [status, loadExtras]);
+
+  async function sendReview(e: React.FormEvent) {
+    e.preventDefault();
+    if (!rating) { setReviewErr("Toque nas estrelas para dar sua nota."); return; }
+    setSending(true); setReviewErr("");
+    const { error } = await supabaseBrowser().rpc("submit_review", { p_token: token, p_rating: rating, p_comment: comment.trim() || null });
+    setSending(false);
+    if (error) { setReviewErr(error.message); return; }
+    setThanks(true);
+    loadExtras();
+  }
 
   const load = useCallback(async () => {
     const { data, error } = await supabaseBrowser().rpc("get_order_by_token", { p_token: token });
@@ -151,6 +182,37 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
         </ol>
       )}
 
+      {extras && (extras.cashback_earned_cents > 0 || extras.points_earned > 0) && (
+        <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200" aria-live="polite">
+          Você ganhou{" "}
+          {extras.cashback_earned_cents > 0 && <b>{brl(extras.cashback_earned_cents)} de cashback</b>}
+          {extras.cashback_earned_cents > 0 && extras.points_earned > 0 && " e "}
+          {extras.points_earned > 0 && <b>+{extras.points_earned} pontos</b>}
+          {" "}neste pedido. Use no próximo!
+        </p>
+      )}
+
+      {extras?.review ? (
+        <section className="card mt-4 text-sm" aria-labelledby="rev-h">
+          <h2 id="rev-h" className="font-extrabold">{thanks ? "Obrigado pela avaliação!" : "Sua avaliação"}</h2>
+          <div className="mt-1"><Stars value={extras.review.rating} size="h-5 w-5" /></div>
+          {extras.review.comment && <p className="mt-1 text-zinc-700">{extras.review.comment}</p>}
+          {extras.review.reply && <p className="mt-2 rounded-xl bg-zinc-50 p-3 text-zinc-700"><b>Resposta da loja:</b> {extras.review.reply}</p>}
+        </section>
+      ) : extras?.can_review ? (
+        <form onSubmit={sendReview} className="card mt-4 text-center" aria-labelledby="rev-h">
+          <h2 id="rev-h" className="font-extrabold">Como foi seu pedido?</h2>
+          <p className="mb-2 text-xs text-zinc-500">Sua opinião ajuda {order.unit.name} a melhorar.</p>
+          <StarInput value={rating} onChange={(n) => { setRating(n); setReviewErr(""); }} disabled={sending} />
+          <label className="sr-only" htmlFor="rev-c">Comentário (opcional)</label>
+          <textarea id="rev-c" className="input mt-3" rows={3} maxLength={1000} placeholder="Conte como foi (opcional)" value={comment} onChange={(e) => setComment(e.target.value)} />
+          {reviewErr && <p role="alert" className="mt-2 text-sm text-red-700">{reviewErr}</p>}
+          <button className="btn mt-3 w-full rounded-2xl py-3 text-white" style={{ background: color }} disabled={sending}>
+            {sending ? "Enviando..." : "Enviar avaliação"}
+          </button>
+        </form>
+      ) : null}
+
       <section className="card mt-4 text-sm">
         <h2 className="mb-2 font-extrabold">Itens</h2>
         {order.items.map((i, k) => (
@@ -167,6 +229,7 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
           <div className="flex justify-between"><span>Subtotal</span><span>{brl(order.subtotal_cents)}</span></div>
           {order.type === "delivery" && <div className="flex justify-between"><span>Entrega</span><span>{order.delivery_fee_cents ? brl(order.delivery_fee_cents) : "Grátis"}</span></div>}
           {order.discount_cents > 0 && <div className="flex justify-between text-green-700"><span>Desconto</span><span>− {brl(order.discount_cents)}</span></div>}
+          {(extras?.cashback_used_cents ?? 0) > 0 && <div className="flex justify-between text-green-700"><span>Cashback usado</span><span>− {brl(extras!.cashback_used_cents)}</span></div>}
           <div className="flex justify-between pt-1 text-base font-black"><span>Total</span><span style={{ color }}>{brl(order.total_cents)}</span></div>
           <p className="text-xs text-zinc-500">
             {PAYMENT_LABEL[order.payment_method]} · {order.payment_status === "paid" ? "pago" : "a pagar"}
