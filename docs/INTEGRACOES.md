@@ -192,3 +192,18 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - **Segurança (CSP):**
   - Os domínios do Meta e do Google só são liberados nas páginas públicas da loja: `/loja/*`, `/pedido/*` e domínio próprio.
   - O painel e o admin continuam com a política fechada.
+
+## PDV pelo WhatsApp (Atendimento)
+
+- **Painel › Atendimento WhatsApp** (dono, gerência, caixa e atendimento):
+  - **Caixa de entrada:** as mensagens que chegam no número oficial (webhook `marketing/webhook`) viram conversas, com filtros abertas, não lidas e encerradas, e atualizam em tempo real.
+  - O cliente é reconhecido pelo telefone. Ao lado da conversa aparecem os pedidos anteriores, o total gasto, o cashback e o último endereço.
+  - **Responder:** `marketing/inbox/send` envia o texto pela Cloud API. A regra fica no banco (`inbox_queue_reply`): só a equipe responde, só dentro da janela de 24 h desde a última mensagem do cliente e com limite de 20 mensagens por minuto.
+  - Os vistos (enviada, entregue, lida) vêm do webhook.
+  - Fora da janela de 24 h, o painel oferece abrir a conversa no WhatsApp da loja.
+  - Mídias (áudio, foto, documento) aparecem como aviso ou legenda; o arquivo fica no celular.
+- **Lançar pedido** (`wa_order`):
+  - Usa as mesmas regras do cardápio (`place_order_core`): preço do servidor, adicionais, área e taxa de entrega, cupom, horário da loja e pedido mínimo.
+  - O pedido entra no canal **WhatsApp**, já aceito e em preparo. Com Pix, fica aguardando o pagamento; cartão online não é aceito por aqui.
+  - Depois do lançamento sai um resumo pronto com o link de acompanhamento, que pode ser enviado na conversa ou pelo WhatsApp da loja (`wa.me`).
+- **Sem a API da Meta:** o botão **Novo pedido** funciona do mesmo jeito para pedidos que chegam pelo WhatsApp comum da loja.
