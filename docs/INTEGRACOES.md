@@ -94,3 +94,10 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - Cupom automático único por cliente (uso único) ou compartilhado.
 - Envio manual (o lojista envia pelo próprio WhatsApp, um a um, com a mensagem pronta) ou pela API oficial (WhatsApp Cloud API, modelos aprovados pela Meta) com status de entregue/lido pelo webhook assinado (`X-Hub-Signature-256`).
 - Automações diárias (~10h): aniversário e "sentimos sua falta". Conversão: pedido do cliente em até 7 dias após a mensagem.
+
+## Avisos de status pelo WhatsApp
+
+- Usa a mesma conta da API oficial do Marketing. Em **Marketing › Avisos de pedido** a loja escolhe os eventos (recebido, em preparo, pronto para retirada, saiu para entrega, concluído, cancelado) e informa o nome do modelo aprovado de cada um (categoria **Utilidade** na Meta). O painel sugere o texto e a ordem das variáveis e tem envio de teste para um número (até 10 por hora).
+- Só recebe quem marcou "receber avisos deste pedido" no checkout (a opção aparece apenas quando a loja tem avisos ligados). Pedidos de marketplace e de mesa nunca recebem.
+- O gatilho no banco enfileira o aviso na mudança de status (um por evento por pedido) e aciona o worker na hora; o worker envia os avisos antes das campanhas, sem janela de horário. Aviso com mais de 30 minutos na fila é descartado para não chegar fora de hora. Entregue/lido/falhou chegam pelo mesmo webhook do Marketing.
+- Sem a API: no detalhe do pedido, **Avisar status ↗** abre o WhatsApp da loja com a mensagem do status atual já escrita.
