@@ -82,7 +82,7 @@ export default function Avaliacoes() {
         <>
           <div className="grid gap-4 lg:grid-cols-3">
             <section className="card flex flex-col items-center justify-center text-center">
-              <p className="text-5xl font-extrabold tabular-nums">{stats.avg.toFixed(1).replace(".", ",")}</p>
+              <p className="text-5xl font-semibold tabular-nums">{stats.avg.toFixed(1).replace(".", ",")}</p>
               <Stars n={stats.avg} size="text-2xl" />
               <p className="mt-2 text-sm text-zinc-600">{stats.total} avaliação(ões) · {stats.positive}% positivas</p>
               {stats.pending > 0 && <p className="mt-1 text-xs font-semibold text-amber-700">{stats.pending} comentário(s) sem resposta</p>}

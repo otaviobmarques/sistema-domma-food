@@ -117,7 +117,7 @@ export function Movement({ status, onChange }: { status: Open; onChange: () => v
             </table>
             <div className={`rounded-xl p-4 text-center ring-1 ${result.difference_cents === 0 ? "bg-green-50 ring-green-200" : result.difference_cents < 0 ? "bg-red-50 ring-red-200" : "bg-amber-50 ring-amber-200"}`}>
               <p className="text-sm font-semibold">{result.difference_cents === 0 ? "Caixa conferido, sem diferença" : result.difference_cents < 0 ? "Faltou no caixa" : "Sobrou no caixa"}</p>
-              <p className={`text-3xl font-extrabold tabular-nums ${diffClass(result.difference_cents)}`}>{brl(Math.abs(result.difference_cents))}</p>
+              <p className={`text-3xl font-semibold tabular-nums ${diffClass(result.difference_cents)}`}>{brl(Math.abs(result.difference_cents))}</p>
             </div>
             <button className="btn-primary w-full" onClick={() => { setClosing(false); onChange(); }}>Concluir</button>
           </div>

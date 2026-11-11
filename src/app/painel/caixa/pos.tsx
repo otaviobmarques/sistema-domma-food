@@ -90,13 +90,13 @@ export function Pos({ onSold }: { onSold: () => void }) {
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-green-100 text-2xl text-green-700">✓</div>
         <div>
           <p className="text-sm text-zinc-500">Venda registrada</p>
-          <p className="text-3xl font-extrabold">Pedido #{done.number}</p>
+          <p className="text-3xl font-semibold">Pedido #{done.number}</p>
           <p className="mt-1 text-sm text-zinc-600">Total {brl(done.total)} · enviado para a cozinha</p>
         </div>
         {done.change > 0 && (
           <div className="rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
             <p className="text-sm font-semibold text-amber-900">Troco</p>
-            <p className="text-4xl font-extrabold tabular-nums text-amber-900">{brl(done.change)}</p>
+            <p className="text-4xl font-semibold tabular-nums text-amber-900">{brl(done.change)}</p>
           </div>
         )}
         <div className="flex gap-2">
@@ -162,7 +162,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
         <dl className="space-y-0.5 border-t border-zinc-200 pt-2 text-sm">
           <div className="flex justify-between"><dt className="text-zinc-500">Subtotal</dt><dd className="tabular-nums">{brl(subtotal)}</dd></div>
           {discount > 0 && <div className="flex justify-between text-green-700"><dt>Desconto</dt><dd className="tabular-nums">− {brl(discount)}</dd></div>}
-          <div className="flex justify-between text-lg font-extrabold"><dt>Total</dt><dd className="tabular-nums">{brl(total)}</dd></div>
+          <div className="flex justify-between text-lg font-semibold"><dt>Total</dt><dd className="tabular-nums">{brl(total)}</dd></div>
         </dl>
 
         <div>

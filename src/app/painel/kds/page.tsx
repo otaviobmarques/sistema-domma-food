@@ -120,7 +120,7 @@ export default function KdsPage() {
   return (
     <div ref={wrap} className={`-m-4 min-h-screen bg-zinc-950 p-4 text-white lg:-m-6 lg:p-6 ${full ? "overflow-y-auto" : ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-extrabold tracking-tight">KDS · Cozinha <span className="ml-2 text-base font-medium text-white/50">{cards.length} pedido(s)</span></h1>
+        <h1 className="text-2xl font-semibold tracking-tight">KDS · Cozinha <span className="ml-2 text-base font-medium text-white/50">{cards.length} pedido(s)</span></h1>
         <div className="flex flex-wrap gap-2">
           <button className={pill(false)} onClick={() => { const v = !compact; setCompact(v); ls.set("df_kds_compact", v ? "1" : "0"); }}>{compact ? "Layout normal" : "Layout compacto"}</button>
           <button className={pill(false)} aria-pressed={muted} onClick={() => { const v = !muted; setMuted(v); mutedRef.current = v; ls.set("df_kds_mute", v ? "1" : "0"); if (!v) beep(); }}>{muted ? "Som desligado" : "Som ligado"}</button>
@@ -156,17 +156,17 @@ export default function KdsPage() {
             const tone = min < 10 ? "bg-emerald-500 text-emerald-950" : min < 20 ? "bg-amber-400 text-amber-950" : "bg-red-500 text-white";
             const border = min < 10 ? "border-emerald-500/40" : min < 20 ? "border-amber-400/60" : "border-red-500";
             return (
-              <article key={o.id} className={`flex flex-col rounded-2xl border-2 bg-zinc-900 ${border}`}>
+              <article key={o.id} className={`flex flex-col rounded-lg border-2 bg-zinc-900 ${border}`}>
                 <header className="flex items-start justify-between gap-2 border-b border-white/10 p-3">
                   <div className="min-w-0">
-                    <p className={`font-extrabold ${compact ? "text-lg" : "text-2xl"}`}>#{o.number}</p>
+                    <p className={`font-semibold ${compact ? "text-lg" : "text-2xl"}`}>#{o.number}</p>
                     <p className="flex flex-wrap items-center gap-1.5 text-sm text-white/70">
                       <ChannelBadge channel={o.channel === "table" || o.channel === "counter" ? "web" : o.channel} />
                       <span className="truncate font-semibold text-white">{o.channel === "table" || o.channel === "counter" ? o.customer_name : o.customer_name.split(" ")[0]}</span>
                       <span>· {o.channel === "counter" ? "Balcão" : TYPE_LABEL[o.type] ?? o.type}</span>
                     </p>
                   </div>
-                  <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-extrabold tabular-nums ${tone}`} aria-label={`${min} minutos`}>{min} min</span>
+                  <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-semibold tabular-nums ${tone}`} aria-label={`${min} minutos`}>{min} min</span>
                 </header>
                 {o.notes && <p className="mx-3 mt-3 rounded-lg bg-amber-400 px-3 py-2 text-sm font-bold text-amber-950">OBS: {o.notes}</p>}
                 <ul className="flex-1 space-y-2 p-3">
@@ -197,7 +197,7 @@ export default function KdsPage() {
                 <footer className="space-y-2 p-3 pt-0">
                   {others > 0 && <p className="text-xs text-white/50">Outros setores: {others} item(ns) pendente(s)</p>}
                   {canAct && (
-                    <button className="w-full rounded-xl bg-emerald-500 py-3 text-base font-extrabold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                    <button className="w-full rounded-xl bg-emerald-500 py-3 text-base font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
                       disabled={mine.some((i) => busy.has(i.id))} onClick={() => void setItems(mine, "done")}>
                       Concluir todos
                     </button>

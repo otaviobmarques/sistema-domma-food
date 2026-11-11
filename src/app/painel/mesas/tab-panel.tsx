@@ -87,7 +87,7 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
         <div className="space-y-3 text-center">
           <p className="text-4xl">✓</p>
           <p className="text-lg font-bold">Total recebido: {brl(done.total)}</p>
-          {done.change > 0 && <p className="rounded-xl bg-amber-50 p-3 text-lg font-extrabold text-amber-900">Troco: {brl(done.change)}</p>}
+          {done.change > 0 && <p className="rounded-xl bg-amber-50 p-3 text-lg font-semibold text-amber-900">Troco: {brl(done.change)}</p>}
           <button className="btn-primary w-full" onClick={onClose}>Voltar ao salão</button>
         </div>
       </Modal>
@@ -138,7 +138,7 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
           <dl className="rounded-xl bg-zinc-50 p-3 text-sm">
             <div className="flex justify-between"><dt>Subtotal</dt><dd className="tabular-nums">{brl(sub)}</dd></div>
             <div className="flex justify-between text-zinc-500"><dt>Taxa de serviço ({pct}%)</dt><dd className="tabular-nums">{brl(Math.round((sub * pct) / 100))}</dd></div>
-            <div className="mt-1 flex justify-between text-base font-extrabold"><dt>Total com serviço</dt><dd className="tabular-nums">{brl(sub + Math.round((sub * pct) / 100))}</dd></div>
+            <div className="mt-1 flex justify-between text-base font-semibold"><dt>Total com serviço</dt><dd className="tabular-nums">{brl(sub + Math.round((sub * pct) / 100))}</dd></div>
           </dl>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <button className="btn-primary col-span-2 py-3 sm:col-span-1" onClick={() => { setErr(""); setMsg(""); setMode("add"); }}>+ Lançar itens</button>
@@ -215,7 +215,7 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
             <div className="flex justify-between"><dt>Subtotal</dt><dd className="tabular-nums">{brl(sub)}</dd></div>
             {fee > 0 && <div className="flex justify-between"><dt>Serviço</dt><dd className="tabular-nums">{brl(fee)}</dd></div>}
             {disc > 0 && <div className="flex justify-between text-green-700"><dt>Desconto</dt><dd className="tabular-nums">− {brl(disc)}</dd></div>}
-            <div className="mt-1 flex justify-between text-lg font-extrabold"><dt>Total</dt><dd className="tabular-nums">{brl(total)}</dd></div>
+            <div className="mt-1 flex justify-between text-lg font-semibold"><dt>Total</dt><dd className="tabular-nums">{brl(total)}</dd></div>
           </dl>
           <div className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 p-3">
             <div className="w-28"><Field label="Dividir entre"><input className="input" type="number" min={1} max={99} value={split} onChange={(e) => setSplit(e.target.value)} /></Field></div>

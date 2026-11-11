@@ -238,7 +238,7 @@ export default function PedidosPage() {
       </div>
 
       {unacked && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-gradient-to-r from-brand-600 to-brand-700 px-4 py-3 text-white shadow-lift" role="alert">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gradient-to-r from-brand-600 to-brand-700 px-4 py-3 text-white shadow-sm" role="alert">
           <span className="flex items-center gap-2 font-semibold"><span className="h-2.5 w-2.5 animate-ping rounded-full bg-white" />Você tem pedidos novos aguardando!</span>
           <button className="btn bg-white text-red-700 hover:bg-red-50" onClick={ackAll}>Silenciar alerta</button>
         </div>
@@ -250,7 +250,7 @@ export default function PedidosPage() {
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-4">
           {columns.map((col) => (
-            <section key={col.key} className="relative flex w-72 shrink-0 flex-col overflow-hidden rounded-2xl bg-zinc-200/45 p-2.5 pt-3.5 ring-1 ring-zinc-200/70" aria-label={col.title}>
+            <section key={col.key} className="relative flex w-72 shrink-0 flex-col overflow-hidden rounded-lg bg-zinc-200/45 p-2.5 pt-3.5 ring-1 ring-zinc-200/70" aria-label={col.title}>
               <span aria-hidden className={`absolute inset-x-0 top-0 h-1 ${col.color}`} />
               <header className="mb-2 flex items-center justify-between px-1">
                 <h2 className="flex items-center gap-2 text-sm font-bold">
@@ -299,14 +299,14 @@ function OrderCard({ o, now, busy, isNew, onOpen, onAction, onConfirmPix }: {
   const finished = o.status === "completed" || o.status === "cancelled";
   const { min, color } = elapsedInfo(o, now);
   return (
-    <article className={`rounded-xl border bg-white p-3.5 shadow-soft transition hover:shadow-lift ${isNew ? "border-brand-400 ring-4 ring-brand-100" : "border-zinc-200/80"}`}>
+    <article className={`rounded-xl border bg-white p-3.5 shadow-soft transition ${isNew ? "border-brand-400 ring-4 ring-brand-100" : "border-zinc-200/80"}`}>
       <button type="button" onClick={onOpen} className="block w-full text-left" aria-label={`Abrir pedido ${o.number}`}>
         <div className="flex items-start justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5">
             <ChannelBadge channel={o.channel} />
-            <span className="truncate font-extrabold">#{o.number} · {o.customer_name.split(" ")[0]}</span>
+            <span className="truncate font-semibold">#{o.number} · {o.customer_name.split(" ")[0]}</span>
           </span>
-          <span className="font-extrabold text-zinc-900">{brl(o.total_cents)}</span>
+          <span className="font-semibold text-zinc-900">{brl(o.total_cents)}</span>
         </div>
         <p className="mt-1 text-xs text-zinc-500">
           {TYPE_LABEL[o.type] ?? o.type}{isMarketplace(o.channel) && o.external_display_id ? ` · nº ${o.external_display_id} no ${channelLabel(o.channel)}` : ""} · {timeHM(o.created_at)}

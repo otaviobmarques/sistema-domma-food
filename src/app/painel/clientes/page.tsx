@@ -211,7 +211,7 @@ export default function Clientes() {
       </div>
       <Alert>{err}</Alert>
       {filtered.length === 0 ? <Empty>Os clientes aparecem aqui automaticamente a cada pedido.</Empty> : (
-        <div className="overflow-x-auto rounded-2xl border border-zinc-200/70 bg-white shadow-soft">
+        <div className="overflow-x-auto rounded-lg border border-zinc-200/70 bg-white shadow-soft">
           <table className="w-full text-sm">
             <thead className="bg-zinc-50/80 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               <tr><th className="p-3">Cliente</th><th className="p-3">Segmento</th><th className="p-3">Pedidos</th><th className="p-3">Total gasto</th><th className="p-3">Ticket médio</th><th className="p-3">Cashback</th><th className="p-3">Pontos</th><th className="p-3">Último pedido</th><th className="p-3">Marketing</th><th /></tr>

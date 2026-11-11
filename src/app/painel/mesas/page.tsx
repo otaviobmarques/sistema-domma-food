@@ -123,9 +123,9 @@ export default function MesasPage() {
               return (
                 <button key={t.id} type="button" onClick={() => clickTable(t)} disabled={st === "free" && !canServe}
                   aria-label={`Mesa ${t.name}, ${ui.label}`}
-                  className={`flex min-h-32 flex-col rounded-2xl border-2 p-3 text-left shadow-soft transition hover:shadow-lift ${ui.card}`}>
+                  className={`flex min-h-32 flex-col rounded-lg border-2 p-3 text-left shadow-soft transition ${ui.card}`}>
                   <span className="flex items-start justify-between gap-2">
-                    <span className="text-2xl font-extrabold tracking-tight">{t.name}</span>
+                    <span className="text-2xl font-semibold tracking-tight">{t.name}</span>
                     <span className={`mt-1.5 h-3 w-3 rounded-full ${ui.dot}`} />
                   </span>
                   {st === "free" ? (
@@ -156,8 +156,8 @@ export default function MesasPage() {
               const ui = STATE_UI[stateOf([t], now)];
               return (
                 <button key={t.id} type="button" onClick={() => setOpenTabId(t.id)}
-                  className={`flex min-h-28 flex-col rounded-2xl border-2 p-3 text-left shadow-soft transition hover:shadow-lift ${ui.card}`}>
-                  <span className="text-lg font-extrabold">Comanda {t.label}</span>
+                  className={`flex min-h-28 flex-col rounded-lg border-2 p-3 text-left shadow-soft transition ${ui.card}`}>
+                  <span className="text-lg font-semibold">Comanda {t.label}</span>
                   {t.customer_name && <span className="truncate text-xs text-zinc-600">{t.customer_name}</span>}
                   <span className="mt-1 font-bold tabular-nums">{brl(tabSubtotal(t))}</span>
                   <span className="mt-auto text-xs text-zinc-600">{fmtDuration(minutesSince(t.opened_at, now))}{t.bill_requested_at ? " · pediu a conta" : ""}</span>
