@@ -21,6 +21,8 @@ const ICONS: Record<string, React.ReactNode> = {
   kds: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4M7 8h4M7 11h7" /></>,
   history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 4v4h4M12 7v5l3 2" /></>,
   team: <><circle cx="8" cy="9" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M2.5 19a5.5 5.5 0 0 1 11 0M14.5 19a4.5 4.5 0 0 1 7 0" /></>,
+  heart: <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />,
+  star: <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3Z" />,
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
@@ -43,6 +45,8 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; sectio
   { href: "/painel/cardapio", label: "Cardápio", icon: "menu", manage: true },
   { href: "/painel/entregas", label: "Áreas de entrega", icon: "delivery", manage: true },
   { href: "/painel/cupons", label: "Cupons", icon: "coupons", manage: true, section: "Vendas" },
+  { href: "/painel/fidelidade", label: "Fidelidade", icon: "heart", manage: true },
+  { href: "/painel/avaliacoes", label: "Avaliações", icon: "star", manage: true },
   { href: "/painel/integracoes", label: "Integrações", icon: "plug", manage: true },
   { href: "/painel/clientes", label: "Clientes", icon: "customers", manage: true },
   { href: "/painel/equipe", label: "Equipe", icon: "team", manage: true, section: "Conta" },

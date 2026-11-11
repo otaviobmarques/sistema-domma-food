@@ -298,3 +298,64 @@ do $$ begin
 end $$;
 reset role;
 select 'FASE2 OK' as resultado;
+-- ===== Fidelidade e avaliações =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+insert into public.loyalty_settings (tenant_id, cashback_enabled, cashback_pct, cashback_max_use_pct, points_enabled, points_per_real)
+  values (current_setting('test.a_tenant')::uuid, true, 10, 50, true, 1);
+insert into public.rewards (tenant_id, name, points_cost) values (current_setting('test.a_tenant')::uuid, 'Refri grátis', 20);
+reset role;
+do $$ declare pid uuid; r jsonb; q jsonb; tok text; dev text; oid uuid; base jsonb; cust uuid;
+begin
+  select id into pid from public.products where tenant_id = current_setting('test.a_tenant')::uuid limit 1; -- 29,90
+  base := jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+          'customer', jsonb_build_object('name','Fiel Cliente','phone','31977770001'),
+          'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1)));
+  set local role anon;
+  r := public.place_order(base); dev := r->>'device_token'; oid := (r->>'order_id')::uuid; tok := r->>'token';
+  if dev is null or (r->>'cashback_used_cents')::int <> 0 then raise exception 'FALHA 1º pedido %', r; end if;
+  reset role;
+  -- loja conclui => +10% cashback (2,99) e 29 pontos
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+  perform public.set_order_status(oid, 'preparing'); perform public.set_order_status(oid, 'ready'); perform public.set_order_status(oid, 'completed');
+  reset role;
+  select id into cust from public.customers where phone = '31977770001';
+  if (select cashback_cents from public.customers where id = cust) <> 299 or (select points_balance from public.customers where id = cust) <> 29 then
+    raise exception 'FALHA crédito: % / %', (select cashback_cents from public.customers where id = cust), (select points_balance from public.customers where id = cust); end if;
+  set local role anon;
+  -- sem token do aparelho: não usa cashback (outra pessoa digitando o telefone)
+  q := public.quote_order(base || jsonb_build_object('use_cashback', true));
+  if (q->>'cashback_applied')::int <> 0 or (q->>'cashback_available')::int <> 0 then raise exception 'FALHA: usou cashback sem aparelho conhecido %', q; end if;
+  if (public.loyalty_info('bella-massa', '31977770001', 'token-falso')->>'cashback_cents') is not null then raise exception 'FALHA: saldo vazou'; end if;
+  -- com token: usa 2,99 (limite 50% de 29,90 = 14,95) => total 26,91
+  q := public.quote_order(base || jsonb_build_object('use_cashback', true, 'device_token', dev));
+  if (q->>'cashback_applied')::int <> 299 or (q->>'total_cents')::int <> 2691 then raise exception 'FALHA cotação %', q; end if;
+  r := public.place_order(base || jsonb_build_object('use_cashback', true, 'device_token', dev, 'change_for_cents', 3000));
+  if (r->>'total_cents')::int <> 2691 then raise exception 'FALHA pedido cashback %', r; end if;
+  reset role;
+  if (select cashback_cents from public.customers where id = cust) <> 0 then raise exception 'FALHA débito'; end if;
+  -- cancelamento devolve o cashback usado
+  set local role authenticated;
+  perform set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+  perform public.set_order_status((r->>'order_id')::uuid, 'cancelled', 'teste');
+  perform public.redeem_reward(cust, (select id from public.rewards limit 1));
+  perform public.loyalty_adjust(cust, 'cashback', 500, 'cortesia');
+  reset role;
+  if (select cashback_cents from public.customers where id = cust) <> 799 or (select points_balance from public.customers where id = cust) <> 9 then
+    raise exception 'FALHA final: % / %', (select cashback_cents from public.customers where id = cust), (select points_balance from public.customers where id = cust); end if;
+  -- expiração
+  update public.loyalty_ledger set expires_at = now() - interval '1 day' where customer_id = cust and amount > 0 and kind = 'cashback';
+  perform private.loyalty_expire();
+  if (select cashback_cents from public.customers where id = cust) <> 0 then raise exception 'FALHA expiração: %', (select cashback_cents from public.customers where id = cust); end if;
+  -- avaliação pelo token do pedido concluído
+  set local role anon;
+  if not (public.order_extras(tok)->>'can_review')::boolean then raise exception 'FALHA can_review'; end if;
+  perform public.submit_review(tok, 5, 'Ótimo!');
+  begin perform public.submit_review(tok, 1, 'de novo'); raise exception 'FALHA avaliou 2x';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if (public.store_reviews('bella-massa')->>'count')::int <> 1 then raise exception 'FALHA store_reviews'; end if;
+  reset role;
+end $$;
+select 'FIDELIDADE OK' as resultado;
