@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { supabaseServer } from "@/lib/supabase/server";
 import { PanelProvider, type PanelUnit, type Role } from "@/lib/panel/context";
 import { Sidebar } from "./sidebar";
+import { BillingGate } from "./billing-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
 
   const loadMemberships = () => sb
     .from("memberships")
-    .select("tenant_id, role, unit_ids, tenants(name, status, trial_ends_at)")
+    .select("tenant_id, role, unit_ids, tenants(name, status, trial_ends_at, cancel_at)")
     .eq("user_id", user.id);
   let { data: memberships } = await loadMemberships();
   if (!memberships?.length) {
@@ -33,7 +34,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const chosen = store.get("df_unit")?.value;
   const unit = (units.find((u) => u.id === chosen) ?? units[0]) as PanelUnit;
   const m = memberships.find((x) => x.tenant_id === unit.tenant_id)!;
-  const tenant = (Array.isArray(m.tenants) ? m.tenants[0] : m.tenants) as { name: string; status: string; trial_ends_at: string } | null;
+  const tenant = (Array.isArray(m.tenants) ? m.tenants[0] : m.tenants) as { name: string; status: string; trial_ends_at: string; cancel_at: string | null } | null;
 
   return (
     <PanelProvider value={{
@@ -43,13 +44,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       <div className="min-h-screen bg-zinc-50 lg:flex">
         <Sidebar />
         <div className="min-w-0 flex-1">
-          {tenant?.status === "trial" && (
-            <div className="flex items-center justify-center gap-2 border-b border-amber-200/70 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">
-              <span className="badge bg-amber-200/70 text-amber-900">Teste grátis</span>
-              Aproveite todos os recursos até {new Date(tenant.trial_ends_at).toLocaleDateString("pt-BR")}.
-            </div>
-          )}
-          <main className="mx-auto max-w-[1400px] p-4 sm:p-6">{children}</main>
+          <BillingGate status={tenant?.status ?? "active"} trialEndsAt={tenant?.trial_ends_at ?? null} cancelAt={tenant?.cancel_at ?? null} role={m.role}>
+            <main className="mx-auto max-w-[1400px] p-4 sm:p-6">{children}</main>
+          </BillingGate>
         </div>
       </div>
     </PanelProvider>

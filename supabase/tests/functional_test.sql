@@ -1005,3 +1005,140 @@ do $$ begin
 end $$;
 reset role;
 select 'AVISOS WHATSAPP OK' as resultado;
+
+-- ===== Cobrança da assinatura (SaaS) =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare t uuid; r jsonb;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  r := public.billing_overview(t);
+  if (r->>'enabled')::boolean then raise exception 'FALHA cobrança ligada por padrão'; end if;
+  if jsonb_array_length(r->'plans') < 4 then raise exception 'FALHA planos'; end if;
+  if public.billing_can_manage(t) is not true then raise exception 'FALHA dono'; end if;
+  -- dono não muda o próprio status, isenção ou validade
+  begin update public.tenants set billing_exempt = true where id = t; raise exception 'FALHA isenção pelo dono';
+  exception when insufficient_privilege then null; end;
+  begin update public.tenants set paid_until = '2099-01-01' where id = t; raise exception 'FALHA validade pelo dono';
+  exception when insufficient_privilege then null; end;
+  perform set_config('test.bt', t::text, false);
+end $$;
+-- funcionário não vê a assinatura
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  begin perform public.billing_overview(current_setting('test.bt')::uuid); raise exception 'FALHA estranho viu assinatura';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- super admin configura (sem teste não ativa)
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ begin
+  begin perform public.admin_billing_save('{}'::jsonb, 'chave-errada'); raise exception 'FALHA chave aceita';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.admin_billing_save('{"env":"sandbox","grace_days":5}'::jsonb, '$aact_hmlg_000000000000000000000000000000');
+  begin perform public.admin_billing_save('{"enabled":true}'::jsonb); raise exception 'FALHA ativou sem teste';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if (public.admin_billing_settings()->>'api_key_hint') <> '0000' then raise exception 'FALHA dica da chave'; end if;
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.bt')::uuid; c jsonb; x public.tenants;
+begin
+  perform public.billing_test_result(true, 'ok');
+  c := public.billing_context(t);
+  if c->>'api_key' <> '$aact_hmlg_000000000000000000000000000000' or (c->'plans'->'completo'->>'price_cents')::int <> 38900 then raise exception 'FALHA contexto %', c; end if;
+  -- assinatura criada durante o teste
+  update public.tenants set status = 'trial', trial_ends_at = now() + interval '3 days', plan_id = 'essencial' where id = t;
+  perform public.billing_save_account(t, jsonb_build_object('customer_id','cus_1','subscription_id','sub_1','plan_id','delivery',
+    'name','Bella Massa Ltda','cpf_cnpj','12345678000199','email','fin@bella.com','status','active','next_due_date', (current_date + 3)::text));
+  if (select plan_id from public.tenants where id = t) <> 'delivery' then raise exception 'FALHA plano'; end if;
+  -- fatura criada (pendente) e paga
+  if public.billing_apply_payment(jsonb_build_object('id','pay_1','subscription','sub_1','customer','cus_1','value',229.0,'netValue',225.5,
+       'status','PENDING','billingType','UNDEFINED','dueDate',(current_date + 3)::text,'invoiceUrl','https://sandbox.asaas.com/i/1')) <> t then raise exception 'FALHA fatura'; end if;
+  if (select status from public.tenants where id = t) <> 'trial' then raise exception 'FALHA pendente mudou status'; end if;
+  perform public.billing_apply_payment(jsonb_build_object('id','pay_1','subscription','sub_1','value',229.0,'status','RECEIVED',
+       'dueDate',(current_date + 3)::text,'paymentDate',current_date::text,'billingType','PIX'));
+  select * into x from public.tenants where id = t;
+  if x.status <> 'active' or x.paid_until <> (current_date + 3 + interval '1 month')::date then raise exception 'FALHA pago % %', x.status, x.paid_until; end if;
+  if (select value_cents from public.billing_invoices where provider_id = 'pay_1') <> 22900 then raise exception 'FALHA valor'; end if;
+  -- próxima fatura vence e atrasa
+  perform public.billing_apply_payment(jsonb_build_object('id','pay_2','subscription','sub_1','value',229.0,'status','OVERDUE','dueDate',(current_date - 6)::text));
+  select * into x from public.tenants where id = t;
+  if x.status <> 'past_due' or x.past_due_since::date <> current_date - 6 then raise exception 'FALHA atraso % %', x.status, x.past_due_since; end if;
+  -- evento repetido é ignorado
+  if public.billing_event_seen('evt_1', 'PAYMENT_OVERDUE', 'pay_2') then raise exception 'FALHA evento novo'; end if;
+  if not public.billing_event_seen('evt_1', 'PAYMENT_OVERDUE', 'pay_2') then raise exception 'FALHA idempotência'; end if;
+  -- cobrança de outra empresa / de fora do Domma não afeta ninguém
+  if public.billing_apply_payment(jsonb_build_object('id','pay_x','subscription','sub_desconhecida','value',10,'status','OVERDUE','dueDate',current_date::text)) is not null then
+    raise exception 'FALHA fatura estranha'; end if;
+end $$;
+-- rotina diária: carência (5 dias) vencida → suspende; pagar reativa
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+set role authenticated;
+do $$ begin perform public.admin_billing_save('{"enabled":true}'::jsonb); end $$;
+reset role;
+do $$ declare t uuid := current_setting('test.bt')::uuid; x public.tenants;
+begin
+  perform private.billing_daily();
+  select * into x from public.tenants where id = t;
+  if x.status <> 'suspended' or x.suspended_reason <> 'billing' then raise exception 'FALHA suspensão %', x.status; end if;
+  if public.get_store('bella-massa') is not null then raise exception 'FALHA loja suspensa no ar'; end if;
+end $$;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.bt')::uuid; x public.tenants;
+begin
+  perform public.billing_apply_payment(jsonb_build_object('id','pay_2','subscription','sub_1','value',229.0,'status','CONFIRMED',
+       'dueDate',(current_date - 6)::text,'paymentDate',current_date::text));
+  select * into x from public.tenants where id = t;
+  if x.status <> 'active' or x.suspended_reason is not null or x.past_due_since is not null then raise exception 'FALHA reativar % %', x.status, x.suspended_reason; end if;
+end $$;
+reset role;
+-- suspensão manual do admin não é desfeita por pagamento; isenção protege da rotina
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare t uuid := current_setting('test.bt')::uuid;
+begin
+  perform public.admin_set_tenant(t, 'delivery', 'suspended');
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.bt')::uuid;
+begin
+  perform public.billing_apply_payment(jsonb_build_object('id','pay_3','subscription','sub_1','value',229.0,'status','RECEIVED','dueDate',(current_date + 20)::text));
+  if (select status from public.tenants where id = t) <> 'suspended' then raise exception 'FALHA pagamento derrubou suspensão manual'; end if;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare t uuid := current_setting('test.bt')::uuid;
+begin
+  perform public.admin_set_tenant(t, 'delivery', 'trial', 14);
+  perform public.admin_set_exempt(t, true);
+end $$;
+reset role;
+do $$ declare t uuid := current_setting('test.bt')::uuid;
+begin
+  update public.tenants set trial_ends_at = now() - interval '30 days' where id = t;
+  perform private.billing_daily();
+  if (select status from public.tenants where id = t) <> 'trial' then raise exception 'FALHA isento suspenso'; end if;
+  update public.tenants set billing_exempt = false, status = 'active', trial_ends_at = now() + interval '14 days', past_due_since = null where id = t;
+end $$;
+-- cancelamento: usa até o fim do período pago
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.bt')::uuid; x public.tenants;
+begin
+  perform public.billing_save_account(t, '{"status":"canceled","subscription_id":null}'::jsonb);
+  select * into x from public.tenants where id = t;
+  if x.cancel_at is null or x.cancel_at < current_date then raise exception 'FALHA cancelamento %', x.cancel_at; end if;
+end $$;
+set request.jwt.claims = '{"role":"anon"}';
+do $$ begin
+  begin perform public.billing_context(current_setting('test.bt')::uuid); raise exception 'FALHA anon contexto'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set request.jwt.claims = '{}';
+do $$ begin
+  update public.billing_settings set enabled = false, api_key_secret_id = null where id;
+  update public.tenants set status = 'active', cancel_at = null, suspended_reason = null where id = current_setting('test.bt')::uuid;
+end $$;
+select 'COBRANCA SAAS OK' as resultado;

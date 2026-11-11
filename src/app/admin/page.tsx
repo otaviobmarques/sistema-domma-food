@@ -5,6 +5,7 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { Alert, Logo } from "@/components/ui";
 import { brl } from "@/lib/format";
+import { BillingSettings, type BillingAdmin } from "./billing";
 
 type Tenant = {
   id: string; name: string; cnpj: string | null; plan_id: string; status: string; trial_ends_at: string; created_at: string;
@@ -24,13 +25,15 @@ export default function AdminPage() {
   const sb = supabaseBrowser();
   const router = useRouter();
   const [d, setD] = useState<Overview | null>(null);
+  const [bill, setBill] = useState<BillingAdmin | null>(null);
   const [q, setQ] = useState("");
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await sb.rpc("admin_overview");
+    const [{ data, error }, b] = await Promise.all([sb.rpc("admin_overview"), sb.rpc("admin_billing_settings")]);
     if (error) setErr(error.message); else setD(data as Overview);
+    if (!b.error) setBill(b.data as BillingAdmin);
   }, [sb]);
   useEffect(() => { load(); }, [load]);
 
@@ -45,6 +48,13 @@ export default function AdminPage() {
     const { error } = await sb.rpc("admin_set_tenant", { p_tenant_id: t.id, p_plan_id: plan, p_status: status, p_trial_days: trialDays ?? null });
     if (error) setErr(error.message); else { setMsg(`${t.name} atualizada.`); load(); }
   }
+
+  async function setExempt(t: Tenant, v: boolean) {
+    setErr(""); setMsg("");
+    const { error } = await sb.rpc("admin_set_exempt", { p_tenant_id: t.id, p_exempt: v });
+    if (error) setErr(error.message); else { setMsg(`${t.name}: ${v ? "isenta de cobrança" : "cobrança normal"}.`); load(); }
+  }
+  const INV: Record<string, string> = { PENDING: "em aberto", OVERDUE: "vencida", RECEIVED: "paga", CONFIRMED: "paga", RECEIVED_IN_CASH: "paga", REFUNDED: "estornada" };
 
   const kpis = d ? [
     ["Empresas", d.totals.tenants], ["Ativas (pagantes)", d.totals.active], ["Em teste", d.totals.trial], ["Lojas", d.totals.units],
@@ -74,6 +84,7 @@ export default function AdminPage() {
             <div key={String(k)} className="card"><p className="text-xs font-medium text-zinc-500">{k}</p><p className="mt-1 text-xl font-bold tabular-nums">{v}</p></div>
           ))}
         </div>
+        {bill && <BillingSettings s={bill} onChanged={load} />}
         <section className="card">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">Empresas</h2>
@@ -83,7 +94,7 @@ export default function AdminPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase text-zinc-500">
-                  <tr><th className="p-2">Empresa</th><th className="p-2">Lojas</th><th className="p-2">Plano</th><th className="p-2">Situação</th><th className="p-2">Pedidos 30d</th><th className="p-2">GMV 30d</th><th className="p-2">Criada</th></tr>
+                  <tr><th className="p-2">Empresa</th><th className="p-2">Lojas</th><th className="p-2">Plano</th><th className="p-2">Situação</th><th className="p-2">Cobrança</th><th className="p-2">Pedidos 30d</th><th className="p-2">GMV 30d</th><th className="p-2">Criada</th></tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
                   {list.map((t) => (
@@ -111,6 +122,15 @@ export default function AdminPage() {
                         </div>
                         {t.status === "trial" && <p className="mt-1 text-xs text-zinc-500">até {new Date(t.trial_ends_at).toLocaleDateString("pt-BR")}</p>}
                       </td>
+                      <td className="p-2 text-xs">
+                        {(() => { const a = bill?.accounts?.[t.id]; const li = a?.last_invoice;
+                          return a?.status === "active" ? <p>Assinante{li ? ` · ${INV[li.status] ?? li.status} ${new Date(li.due_date + "T12:00:00").toLocaleDateString("pt-BR")}` : ""}</p>
+                            : a?.status === "canceled" ? <p className="text-zinc-500">Cancelou</p> : <p className="text-zinc-500">Sem assinatura</p>; })()}
+                        <label className="mt-1 flex items-center gap-1.5 text-zinc-600">
+                          <input type="checkbox" className="h-3.5 w-3.5 accent-brand-600" checked={!!bill?.exempt.includes(t.id)} onChange={(e) => setExempt(t, e.target.checked)} />
+                          Isenta
+                        </label>
+                      </td>
                       <td className="p-2 tabular-nums">{t.orders_30d}</td>
                       <td className="p-2 tabular-nums">{brl(t.gmv_30d_cents)}</td>
                       <td className="p-2 text-xs">{new Date(t.created_at).toLocaleDateString("pt-BR")}</td>
@@ -121,7 +141,7 @@ export default function AdminPage() {
             </div>
           )}
         </section>
-        <p className="text-xs text-zinc-500">Suspender uma empresa tira o cardápio do ar imediatamente; os dados são mantidos. Toda alteração fica registrada na auditoria.</p>
+        <p className="text-xs text-zinc-500">Suspender uma empresa tira o cardápio do ar imediatamente; os dados são mantidos. Suspensão feita aqui não é desfeita por pagamento. Empresas isentas (demonstração, parceiros) nunca são cobradas nem suspensas automaticamente. Toda alteração fica registrada na auditoria.</p>
       </main>
     </div>
   );
