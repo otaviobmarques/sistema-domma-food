@@ -17,6 +17,7 @@ type Order = {
   address: { street: string; number: string; neighborhood: string } | null;
   pix: { key: string | null; merchant_name: string | null; merchant_city: string | null; expires_at: string } | null;
   gateway?: OrderGateway | null;
+  courier?: { name: string; vehicle: string; picked_up_at: string | null } | null;
   unit: { name: string; slug: string; whatsapp: string | null; phone: string | null; logo_url: string | null; primary_color: string };
   items: { name: string; quantity: number; total_cents: number; options: { name: string; quantity: number }[]; notes: string | null }[];
   events: { status: string; at: string }[];
@@ -130,6 +131,11 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
 
       <p className="mt-5 text-sm text-white/85" aria-live="polite">Olá, {order.customer_name}!</p>
       <p className="text-2xl font-black tracking-tight">{STATUS_LABEL[order.status] ?? order.status}</p>
+      {order.status === "dispatched" && order.courier && (
+        <p className="mt-1 text-sm font-semibold text-white/90">
+          Saiu para entrega com {order.courier.name} ({({ moto: "moto", bike: "bike", carro: "carro", a_pe: "a pé" } as Record<string, string>)[order.courier.vehicle] ?? order.courier.vehicle})
+        </p>
+      )}
       {order.scheduled_for && <p className="mt-1 text-sm text-white/85">Agendado para {new Date(order.scheduled_for).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>}
       {!cancelled && order.status !== "completed" && order.estimated_ready_at && (
         <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-sm font-semibold">

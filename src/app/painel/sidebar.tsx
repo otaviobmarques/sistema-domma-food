@@ -29,6 +29,7 @@ const ICONS: Record<string, React.ReactNode> = {
   ledger: <><path d="M6 3h11a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1Z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
   card: <><rect x="2.5" y="5" width="19" height="14" rx="2" /><path d="M2.5 10h19M6 15h4" /></>,
   receipt: <><path d="M6 3h12v18l-2.5-1.5L13 21l-2.5-1.5L8 21l-2-1.5V3Z" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
+  rider: <><circle cx="5.5" cy="17.5" r="2.5" /><circle cx="18.5" cy="17.5" r="2.5" /><path d="M8 17.5h7l2-6h-4l-2 3H7M13 5h3l2.5 6.5M9 8h4" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
 
@@ -40,7 +41,7 @@ function Svg({ name, className = "h-[18px] w-[18px]" }: { name: string; classNam
   );
 }
 
-const NAV: { href: string; label: string; icon: string; manage?: boolean; cashier?: boolean; section?: string }[] = [
+const NAV: { href: string; label: string; icon: string; manage?: boolean; cashier?: boolean; staff?: boolean; section?: string }[] = [
   { href: "/painel", label: "Dashboard", icon: "dashboard", manage: true, section: "Operação" },
   { href: "/painel/pedidos", label: "Pedidos", icon: "orders" },
   { href: "/painel/caixa", label: "Caixa / PDV", icon: "cash" },
@@ -49,6 +50,7 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; cashie
   { href: "/painel/historico", label: "Histórico", icon: "history", manage: true },
   { href: "/painel/cardapio", label: "Cardápio", icon: "menu", manage: true },
   { href: "/painel/entregas", label: "Áreas de entrega", icon: "delivery", manage: true },
+  { href: "/painel/entregadores", label: "Entregadores", icon: "rider", staff: true },
   { href: "/painel/estoque", label: "Estoque", icon: "box", manage: true, section: "Gestão" },
   { href: "/painel/financeiro", label: "Financeiro", icon: "wallet", manage: true },
   { href: "/painel/fiado", label: "Fiado", icon: "ledger", cashier: true },
@@ -69,7 +71,8 @@ export function Sidebar() {
   const path = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const items = NAV.filter((n) => n.cashier ? canManage(role) || role === "cashier" : !n.manage || canManage(role));
+  const items = NAV.filter((n) => n.staff ? canManage(role) || role === "cashier" || role === "attendant"
+    : n.cashier ? canManage(role) || role === "cashier" : !n.manage || canManage(role));
 
   function switchUnit(id: string) {
     document.cookie = `df_unit=${id}; path=/; max-age=31536000; samesite=lax; secure`;

@@ -9,7 +9,7 @@ import {
   brl, errorMessage, formatPhone, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM, TYPE_LABEL,
 } from "@/lib/format";
 import { printTicket } from "./ticket";
-import type { Order } from "./types";
+import { courierOf, type Order } from "./types";
 import { ChannelBadge, channelLabel, isMarketplace } from "@/components/channel-badge";
 
 
@@ -35,7 +35,7 @@ function nextAction(o: Order): { status: string; label: string } | null {
   }
 }
 
-const SELECT = "*, order_items(*)";
+const SELECT = "*, order_items(*), deliveries(status, couriers(name))";
 
 function startOfToday() {
   const d = new Date(); d.setHours(0, 0, 0, 0); return d;
@@ -312,6 +312,7 @@ function OrderCard({ o, now, busy, isNew, onOpen, onAction, onConfirmPix }: {
         </div>
         <p className="mt-1 text-xs text-zinc-500">
           {TYPE_LABEL[o.type] ?? o.type}{isMarketplace(o.channel) && o.external_display_id ? ` · nº ${o.external_display_id} no ${channelLabel(o.channel)}` : ""} · {timeHM(o.created_at)}
+          {courierOf(o) && <> · <b className="text-zinc-700">Entregador: {courierOf(o)!.split(" ")[0]}</b></>}
           {o.scheduled_for && <> · <b className="text-brand-700">Agendado {new Date(o.scheduled_for).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</b></>}
         </p>
         <p className="mt-1 text-xs text-zinc-600">
@@ -399,7 +400,8 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
           <p className="flex flex-wrap items-center gap-2"><span className="text-zinc-500">Origem:</span> <ChannelBadge channel={o.channel} size="md" />
             {o.channel === "web" && <span>Cardápio próprio</span>}
             {o.external_display_id && <span className="text-zinc-600">nº {o.external_display_id}</span>}
-            <span className="text-zinc-500">· {TYPE_LABEL[o.type] ?? o.type}</span></p>
+            <span className="text-zinc-500">· {TYPE_LABEL[o.type] ?? o.type}</span>
+            {courierOf(o) && <span className="text-zinc-600">· Entregador: <b>{courierOf(o)}</b></span>}</p>
           {o.marketplace_cancel_requested && <MarketplaceCancel o={o} />}
           {o.scheduled_for && <p className="font-semibold text-brand-700">Agendado para {new Date(o.scheduled_for).toLocaleString("pt-BR")}</p>}
           {a && (

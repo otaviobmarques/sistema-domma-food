@@ -12,4 +12,9 @@ export type Order = {
   accepted_at: string | null; created_at: string; completed_at: string | null; cancelled_at: string | null;
   external_display_id?: string | null; marketplace_cancel_requested?: boolean; tab_id?: string | null;
   order_items: OrderItem[];
+  deliveries?: { status: string; couriers: { name: string } | null }[];
 };
+
+/** Entregador da entrega ativa (atribuída, em rota ou entregue). */
+export const courierOf = (o: Order) =>
+  o.deliveries?.find((d) => ["assigned", "picked_up", "delivered"].includes(d.status))?.couriers?.name ?? null;
