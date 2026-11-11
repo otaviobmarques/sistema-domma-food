@@ -135,3 +135,16 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - **Status, do iFood para o Domma:** confirmado no gestor do iFood (`CFM`), saiu (`DSP`), concluído (`CON`) e cancelado (`CAN`) são aplicados sem reenviar para o iFood.
 - **Cancelamento pedido pelo cliente:** chega pela plataforma de negociação (`HSD`) e aparece no pedido para a loja aceitar ou recusar (`disputes/{id}/accept|reject`).
 - Para ligar os itens do iFood aos produtos do Domma (estoque e relatórios), use o ID do produto do Domma como código PDV no cardápio do iFood.
+
+## Domínio próprio por loja
+
+- **Loja (Configurações › Domínio próprio do cardápio):** informa o domínio, como `pedidos.minhapizzaria.com.br`. Um subdomínio é o mais simples.
+  - O Domma cadastra o domínio no projeto da Vercel, que emite o HTTPS sozinha, e mostra o DNS a criar: `CNAME → cname.vercel-dns.com` para subdomínio, `A → 76.76.21.21` para domínio raiz, mais o TXT de verificação quando a Vercel pedir.
+  - Uma rotina confere a cada 10 minutos e ativa quando o DNS estiver certo. Domínios ativos são conferidos uma vez por dia.
+- **Funcionamento (`src/proxy.ts`):** o host vira loja pela função `get_unit_by_domain`, só para domínios ativos de lojas não suspensas, com cache de 60 s.
+  - `/` mostra o cardápio, `/checkout` o checkout e `/pedido/...` o acompanhamento.
+  - Painel, login e admin redirecionam para o domínio da plataforma, para a sessão nunca ficar em domínio de terceiros.
+  - Cardápio de outra loja e domínio desconhecido também redirecionam para a plataforma.
+- **Links:** avisos de status e campanhas do WhatsApp passam a usar o domínio da loja quando ele está ativo.
+- **Super admin (/admin):** informa o token da Vercel (Account Settings › Tokens, com acesso ao time do projeto), que fica no Vault. Projeto e time já vêm preenchidos.
+- Se a plataforma ganhar um domínio próprio, por exemplo `dommafood.com.br`, inclua-o em `NEXT_PUBLIC_MAIN_HOSTS` na Vercel para ele ser tratado como domínio principal, e não como loja.

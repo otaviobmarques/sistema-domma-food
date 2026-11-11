@@ -116,7 +116,8 @@ async function add(req: Request) {
   const r = await vercel(c, "POST", `/v10/projects/${pid}/domains`, { name: domain });
   if (r.http !== 200 && !(r.http === 409 && ["domain_already_in_use", "domain_already_exists"].includes(errOf(r).code) && g.current === domain)) {
     const e = errOf(r);
-    const human = e.code === "domain_already_in_use" ? "Este domínio já está ligado a outro projeto na Vercel. Remova-o de lá ou fale com o suporte."
+    const human = r.http === 401 || r.http === 403 ? "A configuração de domínios da plataforma precisa ser revisada. Fale com o suporte."
+      : e.code === "domain_already_in_use" ? "Este domínio já está ligado a outro projeto na Vercel. Remova-o de lá ou fale com o suporte."
       : e.code === "invalid_domain" ? "A Vercel não aceitou este domínio. Confira se ele existe e está registrado." : e.message;
     return json({ error: human }, 400);
   }
