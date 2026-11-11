@@ -451,6 +451,7 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
             <div className="flex justify-between text-base font-bold"><dt>Total</dt><dd>{brl(o.total_cents)}</dd></div>
           </dl>
           {o.payment_status === "paid" && !o.tab_id && o.status !== "cancelled" && <div className="mt-3"><EmitButton orderId={o.id} compact /></div>}
+          <ReprintButton orderId={o.id} />
         </div>
       </div>
 
@@ -498,6 +499,23 @@ function MarketplaceCancel({ o }: { o: Order }) {
         <button className="btn-secondary" disabled={busy} onClick={() => respond(false)}>Recusar</button>
       </div>
       {err && <p className="mt-2 text-xs text-red-700">{err}</p>}
+    </div>
+  );
+}
+
+function ReprintButton({ orderId }: { orderId: string }) {
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    setBusy(true); setMsg("");
+    const { data, error } = await supabaseBrowser().rpc("print_reprint", { p_order_id: orderId });
+    setBusy(false);
+    setMsg(error ? errorMessage(error) : Number(data) > 0 ? `${data} impressão(ões) enviada(s) para a fila.` : "Nenhuma impressora configurada para este pedido.");
+  }
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      <button type="button" className="btn-secondary" disabled={busy} onClick={run}>{busy ? "Enviando..." : "Reimprimir"}</button>
+      {msg && <span className="text-xs text-zinc-600" role="status">{msg}</span>}
     </div>
   );
 }
