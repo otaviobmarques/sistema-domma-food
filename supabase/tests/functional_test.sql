@@ -912,3 +912,96 @@ do $$ begin
 end $$;
 reset role;
 select 'MARKETING OK' as resultado;
+
+-- ===== Avisos de status pelo WhatsApp =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare t uuid;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  begin perform public.status_save_settings(t, true, '[]'::jsonb); raise exception 'FALHA ativou sem API';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.status_save_settings(t, false, '[{"event":"accepted","enabled":true}]'::jsonb); raise exception 'FALHA sem modelo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+do $$ declare t uuid; begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  update public.marketing_settings set wa_enabled = true, wa_phone_number_id = '1234567890' where tenant_id = t;   -- simula API conectada
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare t uuid;
+begin
+  select tenant_id into t from public.units where slug = 'bella-massa';
+  perform public.status_save_settings(t, true, jsonb_build_array(
+    jsonb_build_object('event','received','enabled',true,'template_name','pedido_recebido','params', jsonb_build_array('nome','numero','link')),
+    jsonb_build_object('event','accepted','enabled',true,'template_name','pedido_em_preparo','params', jsonb_build_array('nome','numero','previsao')),
+    jsonb_build_object('event','ready','enabled',true,'template_name','pedido_pronto','params', jsonb_build_array('nome','numero','loja')),
+    jsonb_build_object('event','cancelled','enabled',true,'template_name','pedido_cancelado','params', jsonb_build_array('nome','numero','motivo')),
+    jsonb_build_object('event','completed','enabled',false,'template_name','pedido_entregue')));
+  if (public.status_overview(t)->>'status_enabled')::boolean is not true then raise exception 'FALHA ativar'; end if;
+  if public.status_test(t, 'accepted', '31911112222') is null then raise exception 'FALHA teste'; end if;
+end $$;
+reset role;
+set role anon;
+do $$ declare r jsonb; r2 jsonb;
+begin
+  if (public.get_store('bella-massa')->'unit'->>'wa_status')::boolean is not true then raise exception 'FALHA flag na loja %', public.get_store('bella-massa')->'unit'->>'wa_status'; end if;
+  r := public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash','notify_whatsapp',true,
+        'customer', jsonb_build_object('name','Joana Teste','phone','31977776666'),
+        'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1))));
+  r2 := public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+        'customer', jsonb_build_object('name','Sem Aviso','phone','31977775555'),
+        'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1))));
+  perform set_config('test.norder', r->>'order_id', false);
+  perform set_config('test.norder2', r2->>'order_id', false);
+end $$;
+reset role;
+do $$ declare o uuid := current_setting('test.norder')::uuid; n public.order_notifications;
+begin
+  if not (select notify_whatsapp from public.orders where id = o) then raise exception 'FALHA opção no pedido'; end if;
+  select * into n from public.order_notifications where order_id = o and event = 'received';
+  if not found then raise exception 'FALHA aviso de recebido'; end if;
+  if n.phone <> '5531977776666' or n.params->>0 <> 'Joana' or n.params->>2 not like 'https://domma-food.vercel.app/pedido/%' then raise exception 'FALHA parâmetros %', n; end if;
+  if exists (select 1 from public.order_notifications where order_id = current_setting('test.norder2')::uuid) then raise exception 'FALHA avisou sem opção'; end if;
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare o uuid := current_setting('test.norder')::uuid;
+begin
+  perform public.set_order_status(o, 'preparing');
+  perform public.set_order_status(o, 'ready');
+  perform public.set_order_status(o, 'awaiting_pickup');   -- não repete o "pronto"
+  perform public.set_order_status(o, 'completed');          -- desligado
+  perform public.set_order_status(current_setting('test.norder2')::uuid, 'cancelled', 'Sem estoque');
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare o uuid := current_setting('test.norder')::uuid; j jsonb; r jsonb;
+begin
+  if (select string_agg(event, ',' order by id) from public.order_notifications where order_id = o) <> 'received,accepted,ready' then
+    raise exception 'FALHA eventos %', (select string_agg(event, ',' order by id) from public.order_notifications where order_id = o); end if;
+  r := public.status_jobs(50);
+  if jsonb_array_length(r) <> 4 then raise exception 'FALHA fila % ', jsonb_array_length(r); end if;   -- 3 do pedido + teste
+  if (r->0->>'template') is null or (r->0->>'phone_number_id') <> '1234567890' then raise exception 'FALHA job %', r->0; end if;
+  for j in select * from jsonb_array_elements(r) loop
+    perform public.status_job_result((j->>'id')::bigint, true, 'wamid.T' || (j->>'id'), null);
+  end loop;
+  perform public.marketing_status_update((select tenant_id from public.orders where id = o), 'wamid.T' || (select id from public.order_notifications where order_id = o and event = 'ready'), 'read', null);
+  if (select status from public.order_notifications where order_id = o and event = 'ready') <> 'read' then raise exception 'FALHA leitura'; end if;
+  if jsonb_array_length(public.status_jobs(50)) <> 0 then raise exception 'FALHA repetiu'; end if;
+  -- atrasado é descartado
+  update public.order_notifications set status = 'queued', created_at = now() - interval '1 hour' where order_id = o and event = 'accepted';
+  if jsonb_array_length(public.status_jobs(50)) <> 0 then raise exception 'FALHA atrasado enviado'; end if;
+  if (select status from public.order_notifications where order_id = o and event = 'accepted') <> 'skipped' then raise exception 'FALHA atrasado'; end if;
+end $$;
+set request.jwt.claims = '{"role":"anon"}';
+do $$ begin
+  begin perform public.status_jobs(1); raise exception 'FALHA anon fila'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'AVISOS WHATSAPP OK' as resultado;

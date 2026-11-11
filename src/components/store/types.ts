@@ -16,7 +16,7 @@ export type StoreZone = {
 export type StoreUnit = {
   id: string; slug: string; name: string; description: string | null; logo_url: string | null; cover_url: string | null;
   primary_color: string; phone: string | null; whatsapp: string | null; neighborhood: string | null; city: string | null;
-  state: string | null; has_location: boolean; is_open: boolean; opening_hours: Record<string, [string, string][]>;
+  state: string | null; has_location: boolean; is_open: boolean; wa_status?: boolean; opening_hours: Record<string, [string, string][]>;
   accepts_delivery: boolean; accepts_pickup: boolean; accepts_scheduling: boolean; min_order_cents: number;
   prep_time_min: number; pickup_time_min: number; accepted_payments: string[];
   gateway?: StoreGateway | null;

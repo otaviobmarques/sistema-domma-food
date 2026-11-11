@@ -42,6 +42,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   const [coupon, setCoupon] = useState("");
   const [notes, setNotes] = useState("");
   const [optIn, setOptIn] = useState(false);
+  const [notifyWa, setNotifyWa] = useState(true);
   const [birthday, setBirthday] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteErr, setQuoteErr] = useState("");
@@ -87,6 +88,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
 
   const payload = useMemo(() => ({
     slug, type, payment_method: payment,
+    notify_whatsapp: !!store?.unit.wa_status && notifyWa,
     customer: { name: name.trim(), phone: onlyDigits(phone), opt_in: optIn, ...(optIn && /^\d{4}-\d{2}-\d{2}$/.test(birthday) ? { birthday } : {}) },
     address: type === "delivery" ? { ...addr, lat: geo?.lat ?? null, lng: geo?.lng ?? null } : null,
     coupon_code: coupon.trim() || null,
@@ -97,7 +99,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     device_token: deviceToken,
     items: cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity, notes: i.notes || null,
       options: i.options.map((o) => ({ option_id: o.option_id, quantity: o.quantity })) })),
-  }), [slug, type, payment, name, phone, optIn, birthday, addr, geo, coupon, changeFor, notes, schedule, when, cart.items, wantsCashback, deviceToken]);
+  }), [slug, type, payment, name, phone, optIn, birthday, addr, geo, coupon, changeFor, notes, schedule, when, cart.items, wantsCashback, deviceToken, store, notifyWa]);
 
   // Cotação ao vivo (servidor recalcula tudo)
   useEffect(() => {
@@ -283,6 +285,12 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
         <section className="card space-y-3">
           <Field label="Cupom de desconto"><input className="input uppercase" maxLength={30} value={coupon} onChange={(e) => setCoupon(e.target.value.toUpperCase())} /></Field>
           <Field label="Observações do pedido"><textarea className="input" rows={2} maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+          {u.wa_status && (
+            <label className="flex items-start gap-2 text-xs text-zinc-600">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={notifyWa} onChange={(e) => setNotifyWa(e.target.checked)} />
+              Receber pelo WhatsApp os avisos deste pedido (recebido, em preparo, saiu para entrega). Não é propaganda.
+            </label>
+          )}
           <label className="flex items-start gap-2 text-xs text-zinc-600">
             <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
             Quero receber ofertas e novidades de {u.name} pelo WhatsApp. Posso cancelar quando quiser. Seus dados são usados apenas para o pedido e, se autorizado, para comunicações da loja (LGPD).
