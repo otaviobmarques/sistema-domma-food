@@ -5,6 +5,7 @@ import { canManage, usePanel } from "@/lib/panel/context";
 import { Alert, Field, Modal, Toggle } from "@/components/ui";
 import { ChannelBadge } from "@/components/channel-badge";
 import { errorMessage } from "@/lib/format";
+import { IfoodCard } from "./ifood";
 
 type Conn = {
   id: string; provider: string; display_name: string; merchant_id: string; app_id: string | null; client_id: string | null;
@@ -115,13 +116,15 @@ export default function Integracoes() {
       <div>
         <h1 className="h1">Integrações</h1>
         <p className="mt-1 max-w-3xl text-sm text-zinc-600">
-          Receba os pedidos dos marketplaces direto no gestor de pedidos, com o selo de cada um. As mudanças de status
-          (aceito, pronto, saiu, cancelado) voltam automaticamente para o marketplace. Usamos o padrão aberto
-          <b> Open Delivery</b> (Abrasel), aceito por 99Food, Keeta e aiqfome.
+          Receba os pedidos do iFood e dos outros marketplaces direto no gestor de pedidos, com o selo de cada um. As mudanças de status
+          (aceito, pronto, saiu, cancelado) voltam automaticamente para o marketplace. O iFood usa a API oficial dele; 99Food, Keeta e aiqfome usam o padrão aberto
+          <b> Open Delivery</b> (Abrasel).
         </p>
       </div>
       <Alert>{err && !edit ? err : ""}</Alert>
       <Alert kind="success">{msg}</Alert>
+
+      <IfoodCard />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {PROVIDERS.map((p) => {
