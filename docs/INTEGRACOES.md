@@ -207,3 +207,18 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
   - O pedido entra no canal **WhatsApp**, já aceito e em preparo. Com Pix, fica aguardando o pagamento; cartão online não é aceito por aqui.
   - Depois do lançamento sai um resumo pronto com o link de acompanhamento, que pode ser enviado na conversa ou pelo WhatsApp da loja (`wa.me`).
 - **Sem a API da Meta:** o botão **Novo pedido** funciona do mesmo jeito para pedidos que chegam pelo WhatsApp comum da loja.
+
+## CRM com filtros avançados
+
+- **Painel › Clientes** (dono e gerência): a busca e os filtros rodam no servidor (`crm_search`), sem o limite de 1.000 clientes no navegador. Todos os filtros somam (condição "E"):
+  - **Relacionamento:** segmento (novo, recorrente, fiel, em risco, inativo, sem pedido), situação de marketing e etiquetas.
+  - **Frequência e valor:** número de pedidos, gasto total, ticket médio, cashback mínimo e fiado em aberto.
+  - **Datas:** sem pedir há X dias, pediu nos últimos X dias, primeiro pedido recente e aniversário (hoje, 7 dias, este mês ou o próximo).
+  - **Pedidos:** canal, forma de pagamento, produto comprado, bairro de entrega e loja, com período opcional ("pedidos dos últimos X dias"). Pedidos cancelados não contam.
+- **Filtros salvos** (`crm_segments`, até 50 por conta): ficam em chips no topo da tela e aparecem como público **Filtro do CRM** em Marketing › Campanhas.
+  - O botão **Criar campanha** abre uma campanha nova já com o filtro atual.
+  - A campanha continua respeitando o opt-in de marketing, o descadastro e o intervalo entre mensagens.
+- **Etiquetas:**
+  - Por cliente (`crm_set_tags`): até 20, normalizadas em minúsculas.
+  - Em massa, para todos os clientes do filtro (`crm_bulk_tag`).
+- **Exportar CSV:** exporta o resultado filtrado, até 5.000 clientes, com segmento, etiquetas, ticket médio e aniversário.
