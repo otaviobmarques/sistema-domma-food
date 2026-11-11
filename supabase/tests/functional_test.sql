@@ -456,3 +456,135 @@ do $$ begin
 end $$;
 reset role;
 select 'GESTAO OK' as resultado;
+-- ===== QR Code na mesa =====
+do $$ declare u uuid; tk text; pid uuid; r jsonb; info jsonb; tab uuid; o uuid;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  select qr_token into tk from public.dining_tables where unit_id = u and name = '07';
+  select id into pid from public.products where tenant_id = current_setting('test.a_tenant')::uuid limit 1;
+  perform set_config('test.qr_token', tk, false);
+  perform set_config('test.pid', pid::text, false);
+end $$;
+set role anon;
+do $$ declare tk text := current_setting('test.qr_token'); pid uuid := current_setting('test.pid')::uuid; r jsonb; info jsonb;
+begin
+  if public.table_info('0123456789abcdef01234567') is not null then raise exception 'FALHA token falso'; end if;
+  info := public.table_info(tk);
+  if info->>'table' <> '07' or info->>'slug' <> 'bella-massa' then raise exception 'FALHA info %', info; end if;
+  r := public.table_order(tk, jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 2)), 'Ana', 'sem cebola');
+  if r->>'status' <> 'pending' then raise exception 'FALHA status %', r; end if;
+  perform public.table_call(tk, 'waiter');
+  info := public.table_info(tk);
+  if jsonb_array_length(info->'tab'->'orders') < 1 or info->'tab'->>'waiter_called_at' is null then raise exception 'FALHA tab %', info; end if;
+  -- antiabuso: no máximo 3 pendentes
+  perform public.table_order(tk, jsonb_build_array(jsonb_build_object('product_id', pid)), null, null);
+  perform public.table_order(tk, jsonb_build_array(jsonb_build_object('product_id', pid)), null, null);
+  begin perform public.table_order(tk, jsonb_build_array(jsonb_build_object('product_id', pid)), null, null); raise exception 'FALHA limite pendentes';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- preço vem do servidor: complemento inventado é recusado
+  begin perform public.table_order(tk, jsonb_build_array(jsonb_build_object('product_id', pid, 'options', jsonb_build_array(jsonb_build_object('option_id', gen_random_uuid())))), null, null);
+    raise exception 'FALHA opção falsa';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- anon não lê tabelas internas
+  begin perform 1 from public.tabs; raise exception 'FALHA anon leu tabs'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare tb uuid; tab uuid; o record; tk2 text;
+begin
+  select d.id into tb from public.dining_tables d where d.qr_token = current_setting('test.qr_token');
+  select id into tab from public.tabs where table_id = tb and status = 'open';
+  -- não fecha com pendente
+  begin perform public.tab_close(tab, jsonb_build_array(jsonb_build_object('method','pix','amount_cents',999999)), false, 0, null); raise exception 'FALHA fechou com pendente';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  for o in select id from public.orders where tab_id = tab and status = 'pending' loop
+    perform public.set_order_status(o.id, 'preparing', null);
+  end loop;
+  perform public.tab_ack_call(tab);
+  if (select waiter_called_at from public.tabs where id = tab) is not null then raise exception 'FALHA ack'; end if;
+  perform public.tab_close(tab, jsonb_build_array(jsonb_build_object('method','pix','amount_cents',
+    (select sum(subtotal_cents) from public.orders where tab_id = tab and status <> 'cancelled')::int)), false, 0, null);
+  tk2 := public.table_qr_rotate(tb);
+  if tk2 = current_setting('test.qr_token') then raise exception 'FALHA rotate'; end if;
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  if public.table_info(current_setting('test.qr_token')) is not null then raise exception 'FALHA token antigo ainda vale'; end if;
+end $$;
+reset role;
+select 'QR MESA OK' as resultado;
+
+-- ===== NFC-e =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; pid uuid; r jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  select id into pid from public.products where tenant_id = current_setting('test.a_tenant')::uuid limit 1;
+  begin perform public.fiscal_save_settings(u, '{"enabled": true}'::jsonb, null); raise exception 'FALHA ativou sem token';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.fiscal_save_settings(u, '{"cnpj":"12.345.678/0001-95","legal_name":"Bella Massa LTDA","enabled":true,"auto_emit":true}'::jsonb, 'tok_homologacao_1234567890');
+  begin perform public.fiscal_save_settings(u, '{"environment":"producao"}'::jsonb, null); raise exception 'FALHA produção sem teste';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- venda no PDV com desconto: 2x 29,90 = 59,80 − 9,80 = 50,00; pago 30 pix + 20 dinheiro (troco 0)
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'discount_cents', 980, 'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 2)),
+       'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',3000), jsonb_build_object('method','cash','amount_cents',2000))));
+  perform set_config('test.fiscal_order', r->>'order_id', false);
+  if (select count(*) from public.fiscal_documents where order_id = (r->>'order_id')::uuid and status = 'pending') <> 1 then raise exception 'FALHA emissão automática'; end if;
+  begin perform public.fiscal_request((r->>'order_id')::uuid, null, null); raise exception 'FALHA duplicou nota';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- token não aparece para o lojista
+  if has_function_privilege('public.fiscal_test_token(uuid)', 'execute') or has_function_privilege('public.fiscal_jobs(integer)', 'execute') then raise exception 'FALHA token exposto'; end if;
+  begin perform 1 from public.fiscal_settings where token_secret_id is not null; exception when others then null; end;
+end $$;
+reset role;
+-- worker (service_role)
+do $$ declare jobs jsonb; j jsonb; p jsonb; st text; d uuid;
+begin
+  jobs := public.fiscal_jobs(10);
+  select x into j from jsonb_array_elements(jobs) x where (x->>'id')::uuid = (select id from public.fiscal_documents where order_id = current_setting('test.fiscal_order')::uuid);
+  if j is null or j->>'token' <> 'tok_homologacao_1234567890' then raise exception 'FALHA job %', jobs; end if;
+  p := j->'payload';
+  if p->>'cnpj_emitente' <> '12345678000195' or jsonb_array_length(p->'items') <> 1 then raise exception 'FALHA payload %', p; end if;
+  if (p->'items'->0->>'valor_bruto')::numeric <> 59.80 or (p->'items'->0->>'valor_desconto')::numeric <> 9.80 then raise exception 'FALHA valores %', p->'items'->0; end if;
+  if p->'items'->0->>'descricao' not like 'NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO%' then raise exception 'FALHA homologação'; end if;
+  if (select sum((x->>'valor_pagamento')::numeric) from jsonb_array_elements(p->'formas_pagamento') x) <> 50.00 then raise exception 'FALHA pagamentos %', p->'formas_pagamento'; end if;
+  if not exists (select 1 from jsonb_array_elements(p->'formas_pagamento') x where x->>'forma_pagamento' = '17') then raise exception 'FALHA código pix'; end if;
+  if p->>'data_emissao' !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$' then raise exception 'FALHA data %', p->>'data_emissao'; end if;
+  d := (j->>'id')::uuid;
+  -- provedor fora do ar: volta para a fila
+  st := public.fiscal_job_result(d, 503, '{"mensagem":"indisponível"}'::jsonb);
+  if st <> 'pending' then raise exception 'FALHA retry %', st; end if;
+  update public.fiscal_documents set next_attempt_at = now() where id = d;
+  jobs := public.fiscal_jobs(10);
+  st := public.fiscal_job_result(d, 201, '{"status":"autorizado","numero":"12","serie":"1","chave_nfe":"NFe3126","caminho_danfe":"/arquivos/danfe.html","mensagem_sefaz":"Autorizado o uso da NF-e"}'::jsonb);
+  if st <> 'authorized' or (select number from public.fiscal_documents where id = d) <> '12' then raise exception 'FALHA autorizado %', st; end if;
+  perform set_config('test.fiscal_doc', d::text, false);
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ begin
+  begin perform public.fiscal_cancel(current_setting('test.fiscal_doc')::uuid, 'curto'); raise exception 'FALHA justificativa curta';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.fiscal_cancel(current_setting('test.fiscal_doc')::uuid, 'Cliente desistiu da compra no balcão');
+end $$;
+reset role;
+do $$ declare jobs jsonb; st text; d uuid := current_setting('test.fiscal_doc')::uuid;
+begin
+  jobs := public.fiscal_jobs(10);
+  if not exists (select 1 from jsonb_array_elements(jobs) x where x->>'action' = 'cancel' and (x->>'id')::uuid = d) then raise exception 'FALHA job cancel %', jobs; end if;
+  st := public.fiscal_job_result(d, 200, '{"status":"cancelado","mensagem_sefaz":"Evento registrado"}'::jsonb);
+  if st <> 'cancelled' then raise exception 'FALHA cancelado %', st; end if;
+  -- rejeição da SEFAZ
+  insert into public.fiscal_documents (tenant_id, unit_id, order_id, environment)
+  select tenant_id, unit_id, id, 'homologacao' from public.orders where id = current_setting('test.fiscal_order')::uuid returning id into d;
+  jobs := public.fiscal_jobs(10);
+  st := public.fiscal_job_result(d, 201, '{"status":"erro_autorizacao","mensagem_sefaz":"Rejeição: NCM inexistente"}'::jsonb);
+  if st <> 'rejected' then raise exception 'FALHA rejeição %', st; end if;
+end $$;
+select 'NFCE OK' as resultado;
