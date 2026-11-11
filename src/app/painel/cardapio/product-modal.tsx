@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePanel } from "@/lib/panel/context";
 import { Alert, Field, Modal, Toggle } from "@/components/ui";
@@ -14,8 +14,14 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
   product: Product | null; defaultCategory: string | null; data: MenuData;
   onClose: () => void; onSaved: () => void | Promise<void>;
 }) {
-  const { tenantId } = usePanel();
+  const { tenantId, unit } = usePanel();
   const sb = supabaseBrowser();
+  const [station, setStation] = useState(product?.station ?? "cozinha");
+  const [stations, setStations] = useState<string[]>(["cozinha", "bar"]);
+  useEffect(() => {
+    void sb.from("units").select("kds_stations").eq("id", unit.id).single()
+      .then(({ data: u }: { data: { kds_stations: string[] } | null }) => { if (u?.kds_stations?.length) setStations(u.kds_stations); });
+  }, [sb, unit.id]);
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   const [price, setPrice] = useState(centsToInput(product?.price_cents ?? null));
@@ -61,7 +67,7 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
     setBusy(true);
     const row = {
       name: name.trim(), description: description.trim() || null, price_cents: priceCents, promo_price_cents: promoCents,
-      category_id: categoryId, featured, tags, image_url: imageUrl, sku: sku.trim() || null,
+      category_id: categoryId, featured, tags, image_url: imageUrl, sku: sku.trim() || null, station: station || "cozinha",
       ncm: fiscal.ncm.trim() || null, cfop: fiscal.cfop.trim() || null, csosn: fiscal.csosn.trim() || null, cest: fiscal.cest.trim() || null,
     };
     const res = product
@@ -122,6 +128,11 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
         <div className="flex flex-wrap items-center gap-4">
           <label className="flex items-center gap-2 text-sm"><Toggle checked={featured} onChange={setFeatured} label="Destaque" /> Destaque no cardápio</label>
           <Field label="Código PDV / SKU"><input className="input w-40" value={sku} onChange={(e) => setSku(e.target.value)} /></Field>
+          <Field label="Setor de preparo (KDS)">
+            <select className="input w-44 capitalize" value={station} onChange={(e) => setStation(e.target.value)}>
+              {[...new Set([...stations, station])].map((st) => <option key={st} value={st}>{st}</option>)}
+            </select>
+          </Field>
         </div>
 
         <fieldset>

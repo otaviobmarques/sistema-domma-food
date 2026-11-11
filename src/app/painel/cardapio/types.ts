@@ -6,6 +6,7 @@ export type Product = {
   id: string; tenant_id: string; category_id: string; name: string; description: string | null;
   image_url: string | null; price_cents: number; promo_price_cents: number | null; position: number;
   active: boolean; paused_until: string | null; featured: boolean; tags: string[];
+  station?: string | null;
   sku: string | null; ncm: string | null; cfop: string | null; cest: string | null; csosn: string | null;
 };
 export type OptionGroup = {
