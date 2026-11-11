@@ -80,3 +80,17 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - Rota: ordem sugerida pelo vizinho mais próximo a partir da loja; "Abrir rota no mapa" usa o Google Maps com paradas, sem chave de API.
 - Saída só com o pedido pronto; "Entreguei" exige a forma de pagamento quando há valor a cobrar; "Não consegui entregar" volta o pedido para pronto.
 - Acerto: taxas do entregador (fixa, a taxa de entrega cobrada ou percentual) contra o dinheiro recebido dos clientes; entra no caixa aberto e lança a conta a pagar "Entregadores" no Financeiro.
+
+## Impressão automática
+
+- Impressoras por loja: rede (IP:9100, ESC/POS), do computador (spooler do Windows/macOS/Linux) ou navegador (estação de impressão no painel, com Chrome `--kiosk-printing`).
+- A comanda de cada setor e a via do pedido entram na fila ao aceitar o pedido (ou assim que ele chega, conforme a impressora); itens de mesa imprimem quando lançados.
+- Agente: `tools/print-agent/print-agent.mjs` (também em `/print-agent.mjs`), Node 18+, sem dependências. Autentica com chave própria (só o hash fica no banco), busca a fila a cada 3 s e devolve o resultado; trabalho preso volta para a fila em 2 min.
+- Teste (11/11/2026): impressora de rede simulada recebeu o teste e o pedido #365 (comanda com complemento e observação; via com troco, endereço e referência).
+
+## Marketing e WhatsApp
+
+- Públicos: inativos, novos, frequentes, aniversariantes, todos. Só clientes com autorização de marketing (LGPD), no máximo uma mensagem a cada N dias, quem responde SAIR é descadastrado.
+- Cupom automático único por cliente (uso único) ou compartilhado.
+- Envio manual (o lojista envia pelo próprio WhatsApp, um a um, com a mensagem pronta) ou pela API oficial (WhatsApp Cloud API, modelos aprovados pela Meta) com status de entregue/lido pelo webhook assinado (`X-Hub-Signature-256`).
+- Automações diárias (~10h): aniversário e "sentimos sua falta". Conversão: pedido do cliente em até 7 dias após a mensagem.
