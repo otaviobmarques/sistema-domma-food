@@ -5,7 +5,8 @@ import { usePanel } from "@/lib/panel/context";
 import { Alert } from "@/components/ui";
 import { brl, centsToInput, errorMessage, formatPhone, onlyDigits, parseBRL } from "@/lib/format";
 import { linesToPayload, linesTotal, ProductPicker, usePosCatalog, type PosLine } from "@/components/pos/product-picker";
-import { METHOD_LABEL, METHODS, type Method } from "./types";
+import { METHOD_LABEL, PAY_METHODS, type PayMethod as Method } from "./types";
+import { CreditInfo, creditAvailable, useCreditCustomer } from "@/components/pos/credit-info";
 import { printReceipt, type Receipt } from "./receipt";
 
 type Pay = { key: string; method: Method; value: string };
@@ -36,7 +37,10 @@ export function Pos({ onSold }: { onSold: () => void }) {
   const cashPaid = pays.filter((p) => p.method === "cash").reduce((s, p) => s + parseBRL(p.value), 0);
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
-  const canFinish = lines.length > 0 && paid >= total && change <= cashPaid && pays.every((p) => parseBRL(p.value) > 0) && pays.length > 0 && !busy;
+  const creditAmt = pays.filter((p) => p.method === "credit_account").reduce((s, p) => s + parseBRL(p.value), 0);
+  const creditCust = useCreditCustomer(tenantId, phone, creditAmt > 0 || pays.some((p) => p.method === "credit_account"));
+  const creditOk = creditAmt === 0 || (!!creditCust && creditAvailable(creditCust) >= creditAmt);
+  const canFinish = creditOk && lines.length > 0 && paid >= total && change <= cashPaid && pays.every((p) => parseBRL(p.value) > 0) && pays.length > 0 && !busy;
 
   const addLine = useCallback((l: PosLine) => {
     setErr("");
@@ -167,8 +171,8 @@ export function Pos({ onSold }: { onSold: () => void }) {
 
         <div>
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500">Pagamento</p>
-          <div className="grid grid-cols-5 gap-1.5">
-            {METHODS.map((m) => (
+          <div className="grid grid-cols-3 gap-1.5">
+            {PAY_METHODS.map((m) => (
               <button key={m} type="button" disabled={!lines.length} onClick={() => addPay(m)}
                 className="rounded-lg border border-zinc-300 bg-white px-1 py-2 text-xs font-semibold hover:border-brand-500 hover:text-brand-700 disabled:opacity-40">
                 {METHOD_LABEL[m]}
@@ -192,6 +196,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
                 : <><span className="text-green-700">Valor exato</span><span className="text-green-700">✓</span></>}
             </div>
           )}
+          {pays.some((p) => p.method === "credit_account") && <div className="mt-1.5"><CreditInfo customer={creditCust} phone={phone} amount={creditAmt} /></div>}
           {change > cashPaid && <p className="mt-1 text-xs text-red-700">Só é possível dar troco sobre o valor em dinheiro.</p>}
         </div>
 

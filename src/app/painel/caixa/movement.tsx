@@ -8,7 +8,7 @@ import { diffClass, METHOD_LABEL, METHODS, type CashStatus, type Method, type To
 
 type Open = Extract<CashStatus, { open: true }>;
 type CloseResult = { expected: Totals; counted: Partial<Record<Method, number>>; difference_cents: number };
-const KIND = { sale: "Venda", supply: "Suprimento", withdrawal: "Sangria" } as const;
+const KIND = { sale: "Venda", supply: "Suprimento", withdrawal: "Sangria", credit_payment: "Receb. fiado" } as const;
 
 export function Movement({ status, onChange }: { status: Open; onChange: () => void }) {
   const { unit } = usePanel();
@@ -63,10 +63,14 @@ export function Movement({ status, onChange }: { status: Open; onChange: () => v
         {(["pix", "credit_card", "debit_card", "voucher"] as Method[]).map((m) => (
           <div key={m} className="card"><p className="text-xs font-medium text-zinc-500">{METHOD_LABEL[m]}</p><p className="mt-1 text-lg font-bold tabular-nums">{brl(e[m])}</p></div>
         ))}
+        {(e.credit_account ?? 0) + (e.credit_received ?? 0) > 0 && (
+          <div className="card"><p className="text-xs font-medium text-zinc-500">Fiado</p><p className="mt-1 text-lg font-bold tabular-nums">{brl(e.credit_account ?? 0)}</p>
+            {(e.credit_received ?? 0) > 0 && <p className="text-xs text-green-700">Recebido {brl(e.credit_received ?? 0)}</p>}</div>
+        )}
         <div className="card"><p className="text-xs font-medium text-zinc-500">Suprimentos</p><p className="mt-1 text-lg font-bold tabular-nums text-green-700">{brl(e.supply)}</p></div>
         <div className="card"><p className="text-xs font-medium text-zinc-500">Sangrias</p><p className="mt-1 text-lg font-bold tabular-nums text-red-700">{brl(e.withdrawal)}</p></div>
       </div>
-      <p className="text-xs text-zinc-500">O dinheiro esperado na gaveta só aparece depois do fechamento (conferência cega).</p>
+      <p className="text-xs text-zinc-500">O dinheiro esperado na gaveta só aparece depois do fechamento (conferência cega). Vendas no fiado não entram na contagem; o recebimento do fiado entra na forma em que foi pago.</p>
 
       <section className="card">
         <h2 className="mb-2 font-semibold">Movimentações</h2>

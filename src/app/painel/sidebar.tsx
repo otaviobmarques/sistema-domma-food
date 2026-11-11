@@ -24,6 +24,9 @@ const ICONS: Record<string, React.ReactNode> = {
   heart: <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" />,
   star: <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3Z" />,
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
+  box: <><path d="m21 8-9-5-9 5v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5M12 13v8" /></>,
+  wallet: <><path d="M4 7a2 2 0 0 1 2-2h12v4" /><path d="M4 7v11a2 2 0 0 0 2 2h14V9H6a2 2 0 0 1-2-2Z" /><path d="M16 14.5h.01" /></>,
+  ledger: <><path d="M6 3h11a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1Z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
 
@@ -35,7 +38,7 @@ function Svg({ name, className = "h-[18px] w-[18px]" }: { name: string; classNam
   );
 }
 
-const NAV: { href: string; label: string; icon: string; manage?: boolean; section?: string }[] = [
+const NAV: { href: string; label: string; icon: string; manage?: boolean; cashier?: boolean; section?: string }[] = [
   { href: "/painel", label: "Dashboard", icon: "dashboard", manage: true, section: "Operação" },
   { href: "/painel/pedidos", label: "Pedidos", icon: "orders" },
   { href: "/painel/caixa", label: "Caixa / PDV", icon: "cash" },
@@ -44,6 +47,9 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; sectio
   { href: "/painel/historico", label: "Histórico", icon: "history", manage: true },
   { href: "/painel/cardapio", label: "Cardápio", icon: "menu", manage: true },
   { href: "/painel/entregas", label: "Áreas de entrega", icon: "delivery", manage: true },
+  { href: "/painel/estoque", label: "Estoque", icon: "box", manage: true, section: "Gestão" },
+  { href: "/painel/financeiro", label: "Financeiro", icon: "wallet", manage: true },
+  { href: "/painel/fiado", label: "Fiado", icon: "ledger", cashier: true },
   { href: "/painel/cupons", label: "Cupons", icon: "coupons", manage: true, section: "Vendas" },
   { href: "/painel/fidelidade", label: "Fidelidade", icon: "heart", manage: true },
   { href: "/painel/avaliacoes", label: "Avaliações", icon: "star", manage: true },
@@ -59,7 +65,7 @@ export function Sidebar() {
   const path = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const items = NAV.filter((n) => !n.manage || canManage(role));
+  const items = NAV.filter((n) => n.cashier ? canManage(role) || role === "cashier" : !n.manage || canManage(role));
 
   function switchUnit(id: string) {
     document.cookie = `df_unit=${id}; path=/; max-age=31536000; samesite=lax; secure`;

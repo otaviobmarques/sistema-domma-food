@@ -5,18 +5,19 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePanel } from "@/lib/panel/context";
 import { Alert, Field, Modal, Toggle } from "@/components/ui";
 import { ProductPicker, linesToPayload, linesTotal, type PosCatalog, type PosLine } from "@/components/pos/product-picker";
-import { brl, centsToInput, errorMessage, parseBRL, PAYMENT_LABEL, STATUS_LABEL, timeHM } from "@/lib/format";
+import { brl, centsToInput, errorMessage, formatPhone, parseBRL, PAYMENT_LABEL, STATUS_LABEL, timeHM } from "@/lib/format";
+import { CreditInfo, creditAvailable, useCreditCustomer } from "@/components/pos/credit-info";
 import { printPreBill } from "./prebill";
 import { fmtDuration, liveOrders, minutesSince, tabSubtotal, tabTitle, type DTable, type Tab } from "./types";
 
-const METHODS = ["pix", "cash", "credit_card", "debit_card", "voucher"] as const;
+const METHODS = ["pix", "cash", "credit_card", "debit_card", "voucher", "credit_account"] as const;
 type Pay = { method: (typeof METHODS)[number]; amount: string };
 type Mode = "view" | "add" | "close" | "transfer";
 
 export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
   tab: Tab; tables: DTable[]; catalog: PosCatalog; now: number; onClose: () => void; onChanged: () => Promise<void> | void;
 }) {
-  const { unit, role } = usePanel();
+  const { unit, role, tenantId } = usePanel();
   const sb = supabaseBrowser();
   const canClose = role === "owner" || role === "manager" || role === "cashier";
   const [mode, setMode] = useState<Mode>("view");
@@ -43,6 +44,11 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
   const remaining = Math.max(0, total - paid);
   const change = Math.max(0, paid - total);
   const people = Math.max(1, Number(split) || 1);
+  const [creditPhone, setCreditPhone] = useState("");
+  const creditAmt = pays.filter((p) => p.method === "credit_account").reduce((s, p) => s + parseBRL(p.amount), 0);
+  const hasCredit = pays.some((p) => p.method === "credit_account");
+  const creditCust = useCreditCustomer(tenantId, creditPhone, hasCredit);
+  const creditOk = !hasCredit || (!!creditCust && creditAvailable(creditCust) >= creditAmt);
   const orders = useMemo(() => [...tab.orders].sort((a, b) => a.number - b.number), [tab.orders]);
   const empty = liveOrders(tab).length === 0;
 
@@ -71,7 +77,8 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
   async function closeBill() {
     setBusy(true); setErr("");
     const payments = pays.map((p) => ({ method: p.method, amount_cents: parseBRL(p.amount) })).filter((p) => p.amount_cents > 0);
-    const { data, error } = await sb.rpc("tab_close", { p_tab_id: tab.id, p_payments: payments, p_service_fee: withFee, p_discount_cents: disc });
+    const { data, error } = await sb.rpc("tab_close", { p_tab_id: tab.id, p_payments: payments, p_service_fee: withFee, p_discount_cents: disc,
+      p_customer_id: hasCredit && creditCust ? creditCust.id : null });
     setBusy(false);
     if (error) { setErr(errorMessage(error)); return; }
     setDone({ total: data.total_cents, change: data.change_cents });
@@ -241,6 +248,14 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
             ))}
             <button type="button" className="btn-ghost text-sm" onClick={() => setPays((ps) => [...ps, { method: "cash", amount: remaining ? centsToInput(remaining) : "" }])}>+ Outro pagamento</button>
           </div>
+          {hasCredit && (
+            <div className="space-y-1.5 rounded-xl border border-zinc-200 p-3">
+              <Field label="WhatsApp do cliente (fiado)">
+                <input className="input" inputMode="tel" value={creditPhone} onChange={(e) => setCreditPhone(formatPhone(e.target.value))} placeholder="(31) 99999-9999" />
+              </Field>
+              <CreditInfo customer={creditCust} phone={creditPhone} amount={creditAmt} />
+            </div>
+          )}
           <div className="rounded-xl p-3 text-sm font-bold" role="status">
             {remaining > 0 && <p className="text-red-700">Faltam {brl(remaining)}</p>}
             {remaining === 0 && change === 0 && <p className="text-green-700">Valor exato ✓</p>}
@@ -249,7 +264,7 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
           </div>
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => setMode("view")}>Voltar</button>
-            <button className="btn-success flex-1 py-3" disabled={busy || remaining > 0 || change > cashPaid} onClick={closeBill}>
+            <button className="btn-success flex-1 py-3" disabled={busy || remaining > 0 || change > cashPaid || !creditOk} onClick={closeBill}>
               {busy ? "Fechando..." : `Fechar conta · ${brl(total)}`}
             </button>
           </div>
