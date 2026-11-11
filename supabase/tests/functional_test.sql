@@ -1321,3 +1321,81 @@ do $$ begin
 end $$;
 reset role;
 select 'DOMINIO OK' as resultado;
+
+-- ===== Totem de autoatendimento =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; r jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  r := public.totem_create(u, 'Totem da entrada');
+  if r->>'token' !~ '^dft_[0-9a-f]{40}$' then raise exception 'FALHA chave do totem'; end if;
+  begin perform public.totem_update((r->>'id')::uuid, '{"allow_dine_in":false,"allow_takeout":false}'); raise exception 'FALHA sem consumo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform set_config('test.tt', r->>'token', false);
+  perform set_config('test.tid', r->>'id', false);
+end $$;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';   -- cozinha não cria totem
+do $$ begin
+  begin perform public.totem_create((select id from public.units where slug = 'bella-massa'), 'x'); raise exception 'FALHA cozinha criou totem';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ begin update public.units set is_open_override = true where slug = 'bella-massa'; end $$;
+set role anon;
+do $$ declare r jsonb; i jsonb;
+begin
+  if public.totem_info('dft_' || repeat('0', 40)) is not null then raise exception 'FALHA chave falsa'; end if;
+  i := public.totem_info(current_setting('test.tt'));
+  if i->>'slug' <> 'bella-massa' or not (i->>'allow_pix')::boolean then raise exception 'FALHA info %', i; end if;   -- Mercado Pago do teste de pagamentos
+  -- Pix na tela: aguarda pagamento, com o registro do pagamento pendente
+  r := public.totem_order(current_setting('test.tt'), jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1)), 'pickup', 'Bruno', 'pix');
+  if r->>'status' <> 'awaiting_payment' then raise exception 'FALHA pix %', r; end if;
+  perform set_config('test.tpix', r->>'token', false);
+  begin perform public.totem_order(current_setting('test.tt'), jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1)), 'dine_in', '  ', 'counter');
+    raise exception 'FALHA sem nome'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  r := public.totem_order(current_setting('test.tt'), jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 2)), 'dine_in', ' Ana   Paula ', 'counter');
+  if (r->>'number') is null or r->>'status' <> 'pending' or (r->>'total_cents')::int <= 0 then raise exception 'FALHA pedido %', r; end if;
+  if public.totem_ping(current_setting('test.tt')) is not true then raise exception 'FALHA ping'; end if;
+  perform set_config('test.torder', r->>'token', false);
+end $$;
+reset role;
+do $$ declare o public.orders;
+begin
+  select * into o from public.orders where public_token = current_setting('test.torder');
+  if o.channel <> 'totem' or o.type <> 'dine_in' or o.customer_name <> 'Ana Paula' or o.notes not like '%PAGAR NO CAIXA%' or o.totem_id is null then
+    raise exception 'FALHA gravação %', to_jsonb(o); end if;
+  if (select count(*) from public.order_items where order_id = o.id) <> 1 then raise exception 'FALHA itens'; end if;
+  perform set_config('test.toid', o.id::text, false);
+  if (select count(*) from public.payments p join public.orders x on x.id = p.order_id where x.public_token = current_setting('test.tpix') and p.status = 'pending') <> 1 then
+    raise exception 'FALHA pagamento pendente do Pix'; end if;
+end $$;
+-- caixa recebe o pedido do totem
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare oid uuid := current_setting('test.toid')::uuid; tot int; r jsonb; u uuid;
+begin
+  select total_cents, unit_id into tot, u from public.orders where id = oid;
+  if private.open_session(u) is null then perform public.cash_open(u, 10000); end if;
+  begin perform public.order_receive(oid, jsonb_build_array(jsonb_build_object('method','pix','amount_cents', tot - 1))); raise exception 'FALHA recebeu a menos';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  r := public.order_receive(oid, jsonb_build_array(jsonb_build_object('method','cash','amount_cents', tot + 1000)));
+  if (r->>'change_cents')::int <> 1000 then raise exception 'FALHA troco %', r; end if;
+  if (select payment_status from public.orders where id = oid) <> 'paid' then raise exception 'FALHA pago'; end if;
+  if not exists (select 1 from public.cash_moves where order_id = oid and kind = 'sale') then raise exception 'FALHA caixa'; end if;
+  begin perform public.order_receive(oid, jsonb_build_array(jsonb_build_object('method','cash','amount_cents', tot))); raise exception 'FALHA recebeu duas vezes';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- desativar o totem corta os pedidos
+  perform public.totem_update(current_setting('test.tid')::uuid, '{"active":false}');
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  begin perform public.totem_order(current_setting('test.tt'), jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1)), 'pickup', 'Ana', 'counter');
+    raise exception 'FALHA totem desativado'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.order_receive(current_setting('test.toid')::uuid, '[]'); raise exception 'FALHA anon receber'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'TOTEM OK' as resultado;
