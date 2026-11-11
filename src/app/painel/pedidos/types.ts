@@ -10,6 +10,6 @@ export type Order = {
   total_cents: number; payment_method: string; payment_status: string; change_for_cents: number | null;
   coupon_code: string | null; notes: string | null; cancel_reason: string | null;
   accepted_at: string | null; created_at: string; completed_at: string | null; cancelled_at: string | null;
-  external_display_id?: string | null; marketplace_cancel_requested?: boolean;
+  external_display_id?: string | null; marketplace_cancel_requested?: boolean; tab_id?: string | null;
   order_items: OrderItem[];
 };

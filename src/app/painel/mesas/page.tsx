@@ -6,22 +6,25 @@ import { Alert, Empty, Field, Modal, Toggle } from "@/components/ui";
 import { usePosCatalog } from "@/components/pos/product-picker";
 import { brl, errorMessage } from "@/lib/format";
 import { TabPanel } from "./tab-panel";
-import { fmtDuration, IDLE_MIN, lastActivity, minutesSince, tabSubtotal, type DTable, type Tab } from "./types";
+import { fmtDuration, IDLE_MIN, lastActivity, minutesSince, pendingQr, tabSubtotal, type DTable, type Tab } from "./types";
+import { QrAlerts, QrModal } from "./qr";
 
 const SERVE_ROLES = ["owner", "manager", "cashier", "attendant", "waiter"];
-const TAB_SELECT = "id, table_id, label, customer_name, people, service_fee_pct, bill_requested_at, opened_at, " +
-  "orders(id, number, status, subtotal_cents, created_at, order_items(id, name, quantity, total_cents, notes, kds_status, options))";
+const TAB_SELECT = "id, table_id, label, customer_name, people, service_fee_pct, bill_requested_at, opened_at, waiter_called_at, opened_via, " +
+  "orders(id, number, status, subtotal_cents, created_at, via_qr, notes, order_items(id, name, quantity, total_cents, notes, kds_status, options))";
 
-type State = "free" | "busy" | "bill" | "idle";
+type State = "free" | "busy" | "bill" | "idle" | "call";
 const STATE_UI: Record<State, { label: string; card: string; dot: string }> = {
   free: { label: "Livre", card: "border-zinc-200 bg-white hover:border-zinc-300", dot: "bg-zinc-300" },
   busy: { label: "Ocupada", card: "border-brand-300 bg-brand-50 hover:border-brand-400", dot: "bg-brand-600" },
   bill: { label: "Pediu a conta", card: "border-amber-400 bg-amber-50 hover:border-amber-500", dot: "bg-amber-500" },
   idle: { label: "Sem pedido há um tempo", card: "border-red-400 bg-red-50 hover:border-red-500", dot: "bg-red-500" },
+  call: { label: "Chamando / pedido do QR", card: "border-violet-500 bg-violet-50 hover:border-violet-600 ring-2 ring-violet-200", dot: "bg-violet-600" },
 };
 
 function stateOf(tabs: Tab[], now: number): State {
   if (!tabs.length) return "free";
+  if (tabs.some((t) => t.waiter_called_at || pendingQr(t).length)) return "call";
   if (tabs.some((t) => t.bill_requested_at)) return "bill";
   if (tabs.every((t) => minutesSince(lastActivity(t), now) >= IDLE_MIN)) return "idle";
   return "busy";
@@ -41,10 +44,11 @@ export default function MesasPage() {
   const [pickTable, setPickTable] = useState<DTable | null>(null);       // mesa com várias comandas
   const [newTab, setNewTab] = useState<{ table: DTable | null } | null>(null);
   const [manage, setManage] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
 
   const load = useCallback(async () => {
     const [t, tb] = await Promise.all([
-      sb.from("dining_tables").select("id, name, area, seats, position, active").eq("unit_id", unit.id).order("area").order("position").order("name"),
+      sb.from("dining_tables").select("id, name, area, seats, position, active, qr_token").eq("unit_id", unit.id).order("area").order("position").order("name"),
       sb.from("tabs").select(TAB_SELECT).eq("unit_id", unit.id).eq("status", "open").order("opened_at"),
     ]);
     if (t.error || tb.error) { setErr((t.error ?? tb.error)!.message); return; }
@@ -91,10 +95,12 @@ export default function MesasPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {canServe && <button className="btn-secondary" onClick={() => setNewTab({ table: null })}>+ Comanda avulsa</button>}
+          {canManage(role) && <button className="btn-secondary" onClick={() => setQrOpen(true)}>QR Code das mesas</button>}
           {canManage(role) && <button className="btn-secondary" onClick={() => setManage(true)}>Gerenciar mesas</button>}
         </div>
       </div>
       <Alert>{err}</Alert>
+      {canServe && <QrAlerts tabs={tabs} tables={tables} now={now} onOpen={setOpenTabId} onChanged={load} />}
       <div className="flex flex-wrap gap-3 text-xs text-zinc-600">
         {(Object.keys(STATE_UI) as State[]).map((s) => (
           <span key={s} className="inline-flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${STATE_UI[s].dot}`} />{s === "idle" ? `Sem pedido há ${IDLE_MIN}+ min` : STATE_UI[s].label}</span>
@@ -137,7 +143,9 @@ export default function MesasPage() {
                         {people} pessoa(s) · {fmtDuration(minutesSince(oldest.opened_at, now))}
                         {list.length > 1 && ` · ${list.length} comandas`}
                       </span>
-                      {st === "bill" && <span className="mt-1 text-xs font-bold text-amber-800">Pediu a conta</span>}
+                      {list.some((x) => x.waiter_called_at) && <span className="mt-1 text-xs font-bold text-violet-800">Chamando o garçom</span>}
+                      {list.some((x) => pendingQr(x).length) && <span className="mt-1 text-xs font-bold text-violet-800">Pedido do QR aguardando</span>}
+                      {list.some((x) => x.bill_requested_at) && <span className="mt-1 text-xs font-bold text-amber-800">Pediu a conta</span>}
                       {st === "idle" && <span className="mt-1 text-xs font-bold text-red-700">Sem pedido há {fmtDuration(idle)}</span>}
                     </>
                   )}
@@ -192,6 +200,7 @@ export default function MesasPage() {
         <OpenTabModal table={newTab.table} unitId={unit.id} onClose={() => setNewTab(null)}
           onOpened={async (id) => { setNewTab(null); await load(); setOpenTabId(id); }} />
       )}
+      {qrOpen && <QrModal tables={tables} unitId={unit.id} unitName={unit.name} onClose={() => setQrOpen(false)} onChanged={load} />}
       {manage && <ManageTables tables={tables} tenantId={tenantId} unitId={unit.id} busyIds={new Set(byTable.keys())} onClose={() => setManage(false)} onChanged={load} />}
     </div>
   );

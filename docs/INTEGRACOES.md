@@ -55,3 +55,12 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
   cancelamento pedido pelo marketplace, isolamento entre lojas e proteção do segredo.
 - Teste ponta a ponta feito em produção com um marketplace simulado: webhook com assinatura falsa → 403; assinado → 204
   e pedido criado; repetido → ignorado; aceite na loja → `confirm` e `preparing` entregues ao marketplace.
+
+## NFC-e (Focus NFe)
+
+- A nota é montada no banco (`private.fiscal_payload`) com itens, descontos rateados e formas de pagamento proporcionais ao total; taxa de serviço e de entrega ficam fora da nota.
+- Fila em `fiscal_documents`; a Edge Function `fiscal` (`/worker`) envia para a API v2 da Focus (`POST /v2/nfce?ref=`, cancelamento `DELETE /v2/nfce/{ref}`), com nova tentativa e espera crescente quando o provedor não responde, e consulta antes de reenviar.
+- O token do provedor fica no Vault e só é lido pela função interna (trava `private.assert_service_role`).
+- Emissão automática (opcional): PDV na venda, delivery/retirada ao concluir pago, mesa ao fechar a conta. Marketplaces ficam de fora por padrão.
+- Para produção, cada CNPJ precisa: conta no provedor, certificado A1, CSC da SEFAZ e inscrição estadual habilitada. NCM/CFOP/CSOSN devem ser conferidos pelo contador.
+- Teste de ponta a ponta (11/11/2026): com token inválido em homologação a Focus respondeu "Access token inválido" e a nota ficou como rejeitada, com reenvio disponível.

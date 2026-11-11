@@ -8,6 +8,7 @@ export type Product = {
   active: boolean; paused_until: string | null; featured: boolean; tags: string[];
   station?: string | null;
   sku: string | null; ncm: string | null; cfop: string | null; cest: string | null; csosn: string | null;
+  fiscal_origin?: string | null; fiscal_unit?: string | null;
 };
 export type OptionGroup = {
   id: string; tenant_id: string; name: string; min_select: number; max_select: number;

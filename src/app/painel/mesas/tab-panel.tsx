@@ -8,6 +8,7 @@ import { ProductPicker, linesToPayload, linesTotal, type PosCatalog, type PosLin
 import { brl, centsToInput, errorMessage, formatPhone, parseBRL, PAYMENT_LABEL, STATUS_LABEL, timeHM } from "@/lib/format";
 import { CreditInfo, creditAvailable, useCreditCustomer } from "@/components/pos/credit-info";
 import { printPreBill } from "./prebill";
+import { EmitButton } from "@/components/fiscal/emit-button";
 import { fmtDuration, liveOrders, minutesSince, tabSubtotal, tabTitle, type DTable, type Tab } from "./types";
 
 const METHODS = ["pix", "cash", "credit_card", "debit_card", "voucher", "credit_account"] as const;
@@ -95,6 +96,7 @@ export function TabPanel({ tab, tables, catalog, now, onClose, onChanged }: {
           <p className="text-4xl">✓</p>
           <p className="text-lg font-bold">Total recebido: {brl(done.total)}</p>
           {done.change > 0 && <p className="rounded-xl bg-amber-50 p-3 text-lg font-semibold text-amber-900">Troco: {brl(done.change)}</p>}
+          <EmitButton tabId={tab.id} compact />
           <button className="btn-primary w-full" onClick={onClose}>Voltar ao salão</button>
         </div>
       </Modal>

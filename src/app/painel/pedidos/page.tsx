@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePanel } from "@/lib/panel/context";
 import { Alert, Empty, Modal, Toggle } from "@/components/ui";
+import { EmitButton } from "@/components/fiscal/emit-button";
 import {
   brl, errorMessage, formatPhone, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM, TYPE_LABEL,
 } from "@/lib/format";
@@ -443,6 +444,7 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
             {o.discount_cents > 0 && <div className="flex justify-between text-green-700"><dt>Desconto</dt><dd>- {brl(o.discount_cents)}</dd></div>}
             <div className="flex justify-between text-base font-bold"><dt>Total</dt><dd>{brl(o.total_cents)}</dd></div>
           </dl>
+          {o.payment_status === "paid" && !o.tab_id && o.status !== "cancelled" && <div className="mt-3"><EmitButton orderId={o.id} compact /></div>}
         </div>
       </div>
 
