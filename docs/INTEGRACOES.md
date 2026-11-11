@@ -101,3 +101,17 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - Só recebe quem marcou "receber avisos deste pedido" no checkout (a opção aparece apenas quando a loja tem avisos ligados). Pedidos de marketplace e de mesa nunca recebem.
 - O gatilho no banco enfileira o aviso na mudança de status (um por evento por pedido) e aciona o worker na hora; o worker envia os avisos antes das campanhas, sem janela de horário. Aviso com mais de 30 minutos na fila é descartado para não chegar fora de hora. Entregue/lido/falhou chegam pelo mesmo webhook do Marketing.
 - Sem a API: no detalhe do pedido, **Avisar status ↗** abre o WhatsApp da loja com a mensagem do status atual já escrita.
+
+## Cobrança da assinatura (Asaas)
+
+- Assinatura mensal por empresa no Asaas, com fatura paga por Pix, boleto ou cartão na página do próprio Asaas. Dados de cartão nunca passam pelo Domma.
+- **Dono da conta:** em **Assinatura**, escolhe o plano, informa CPF/CNPJ e o e-mail das faturas e assina. Se assinar durante o teste grátis, a 1ª fatura vence no fim do teste. Também pode trocar de plano (vale para a fatura em aberto e as próximas, sem cobrança proporcional) e cancelar (a conta fica ativa até o fim do período já pago). As faturas aparecem com o link para pagar.
+- **Situação da empresa:** teste → ativa quando a fatura é paga. Teste vencido ou fatura vencida → **pagamento pendente** (faixa vermelha no painel) → **suspensa** depois da carência, que é configurável e de 7 dias por padrão. Suspensa, a loja sai do ar e o painel fica bloqueado; só a tela de Assinatura continua aberta para o dono pagar, e o pagamento reativa na hora. Suspensão feita pelo admin não é desfeita por pagamento.
+- **Super admin (/admin):**
+  - Configura ambiente (sandbox/produção), chave da API (no Vault) e carência, e testa a conexão.
+  - Cria no Asaas o webhook de **Cobranças** (v3, envio sequencial) com a URL e o token mostrados. O token vai no cabeçalho `asaas-access-token`.
+  - Só então liga a cobrança. Enquanto estiver desligada, ninguém é cobrado nem suspenso.
+  - Marca empresas **isentas** (demonstração, parceiros).
+- **Webhook:** cada aviso é processado uma única vez, pelo `id` do evento. A Edge Function confere a cobrança no Asaas antes de aplicar, então não confia só no corpo do aviso.
+- **Rotina diária (6h23 de Brasília):** fim do teste, fim da carência e fim de assinatura cancelada.
+- Nota fiscal de serviço: pode ser emitida pelo próprio Asaas (configuração na conta do Asaas).
