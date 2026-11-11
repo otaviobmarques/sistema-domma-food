@@ -33,6 +33,7 @@ const ICONS: Record<string, React.ReactNode> = {
   receipt: <><path d="M6 3h12v18l-2.5-1.5L13 21l-2.5-1.5L8 21l-2-1.5V3Z" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
   rider: <><circle cx="5.5" cy="17.5" r="2.5" /><circle cx="18.5" cy="17.5" r="2.5" /><path d="M8 17.5h7l2-6h-4l-2 3H7M13 5h3l2.5 6.5M9 8h4" /></>,
   badge: <><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" /><path d="M9 11.5h6M12 8.5v6" /></>,
+  totem: <><rect x="6" y="2.5" width="12" height="15" rx="2" /><path d="M9 21.5h6M12 17.5v4M9 7h6M9 10.5h4" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
 
@@ -50,6 +51,7 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; cashie
   { href: "/painel/caixa", label: "Caixa / PDV", icon: "cash" },
   { href: "/painel/mesas", label: "Mesas e comandas", icon: "tables" },
   { href: "/painel/kds", label: "KDS (cozinha)", icon: "kds" },
+  { href: "/painel/totens", label: "Totens", icon: "totem", manage: true },
   { href: "/painel/historico", label: "Histórico", icon: "history", manage: true },
   { href: "/painel/cardapio", label: "Cardápio", icon: "menu", manage: true },
   { href: "/painel/entregas", label: "Áreas de entrega", icon: "delivery", manage: true },

@@ -6,7 +6,7 @@ import { Alert, Empty, Modal, Toggle } from "@/components/ui";
 import { EmitButton } from "@/components/fiscal/emit-button";
 import { GatewayBlock, useOrderGateway } from "../pagamentos/shared";
 import {
-  brl, errorMessage, formatPhone, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM, TYPE_LABEL,
+  brl, errorMessage, formatPhone, onlyDigits, parseBRL, PAYMENT_LABEL, STATUS_LABEL, timeHM, TYPE_LABEL,
 } from "@/lib/format";
 import { printTicket } from "./ticket";
 import { courierOf, statusMessage, type Order } from "./types";
@@ -456,6 +456,8 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
           </dl>
           {o.payment_status === "paid" && !o.tab_id && o.status !== "cancelled" && <div className="mt-3"><EmitButton orderId={o.id} compact /></div>}
           <ReprintButton orderId={o.id} />
+          {o.payment_status !== "paid" && o.type !== "delivery" && !o.tab_id && !isMarketplace(o.channel)
+            && !["cancelled", "awaiting_payment"].includes(o.status) && o.payment_method !== "online_card" && <ReceiveAtCounter o={o} />}
         </div>
       </div>
 
@@ -482,6 +484,47 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Recebe no caixa um pedido ainda não pago (totem "pagar no caixa", retirada). */
+function ReceiveAtCounter({ o }: { o: Order }) {
+  const sb = supabaseBrowser();
+  const [open, setOpen] = useState(false);
+  const [method, setMethod] = useState("cash");
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+  const cents = method === "cash" && amount ? parseBRL(amount) : o.total_cents;
+  async function receive() {
+    setBusy(true); setErr("");
+    const { data, error } = await sb.rpc("order_receive", { p_order_id: o.id, p_payments: [{ method, amount_cents: cents }] });
+    setBusy(false);
+    if (error) { setErr(errorMessage(error)); return; }
+    const change = (data as { change_cents: number }).change_cents;
+    setDone(change > 0 ? `Recebido. Troco: ${brl(change)}` : "Recebido.");
+  }
+  if (done) return <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-800">{done}</p>;
+  if (!open) return <button className="btn-success mt-3 w-full" onClick={() => setOpen(true)}>Receber {brl(o.total_cents)} no caixa</button>;
+  return (
+    <div className="mt-3 space-y-2 rounded-lg border border-zinc-200 p-3">
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Forma de pagamento">
+        {([["cash", "Dinheiro"], ["pix", "Pix"], ["debit_card", "Débito"], ["credit_card", "Crédito"], ["voucher", "Vale"]] as const).map(([k, l]) => (
+          <button key={k} type="button" role="radio" aria-checked={method === k} className={method === k ? "btn-primary px-3 py-1.5 text-sm" : "btn-secondary px-3 py-1.5 text-sm"}
+            onClick={() => setMethod(k)}>{l}</button>
+        ))}
+      </div>
+      {method === "cash" && (
+        <label className="block text-sm"><span className="label">Valor recebido (para o troco)</span>
+          <input className="input" inputMode="decimal" placeholder={brl(o.total_cents)} value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+      )}
+      {err && <p className="text-sm text-red-700">{err}</p>}
+      <div className="flex gap-2">
+        <button className="btn-success" disabled={busy || cents < o.total_cents} onClick={() => void receive()}>{busy ? "Recebendo..." : "Confirmar recebimento"}</button>
+        <button className="btn-ghost" onClick={() => setOpen(false)}>Voltar</button>
+      </div>
+    </div>
   );
 }
 
