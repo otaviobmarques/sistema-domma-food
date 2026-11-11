@@ -148,3 +148,19 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - **Links:** avisos de status e campanhas do WhatsApp passam a usar o domínio da loja quando ele está ativo.
 - **Super admin (/admin):** informa o token da Vercel (Account Settings › Tokens, com acesso ao time do projeto), que fica no Vault. Projeto e time já vêm preenchidos.
 - Se a plataforma ganhar um domínio próprio, por exemplo `dommafood.com.br`, inclua-o em `NEXT_PUBLIC_MAIN_HOSTS` na Vercel para ele ser tratado como domínio principal, e não como loja.
+
+## Totem de autoatendimento
+
+- **Painel › Totens:** o gestor cria um totem (por exemplo, "Totem da entrada") e recebe um link `/totem/<chave>` com QR Code.
+  - A chave é guardada só como hash, então o link aparece uma vez; dá para gerar outro ou desativar o totem.
+  - Opções por totem: comer aqui, para levar, Pix na tela, pagar no caixa e aceitar automaticamente.
+  - O painel mostra se o totem está ligado agora (sinal a cada minuto).
+- **No aparelho (tablet ou tela touch):**
+  - Fluxo: tela de início → comer aqui ou levar → cardápio por categoria → adicionais → revisão → nome → pagamento → número do pedido em destaque.
+  - Inatividade: depois de 75 s sem toque, pergunta se o cliente ainda está ali e recomeça sozinho, apagando a sacola e os dados do cliente anterior.
+  - Para travar o aparelho no cardápio: Android "Fixar app", iPad "Acesso Guiado", computador com Chrome `--kiosk`.
+- **Pagamento:**
+  - **Pix na tela:** usa o Mercado Pago configurado em Pagamento online. O pedido fica aguardando pagamento e entra na cozinha quando o Pix é confirmado.
+  - **Pagar no caixa:** o pedido entra marcado "PAGAR NO CAIXA". Em Pedidos, o botão **Receber no caixa** (`order_receive`) registra a forma de pagamento e o troco no caixa aberto.
+  - Cartão direto no totem (TEF/maquininha integrada) ainda não é suportado. Nesse caso, o cliente paga no caixa.
+- **Proteções:** limite de 15 pedidos a cada 10 minutos por totem, teto de valor por pedido, loja fechada não aceita pedidos e totem desativado para na hora.
