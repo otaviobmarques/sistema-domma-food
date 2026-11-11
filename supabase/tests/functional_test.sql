@@ -693,3 +693,98 @@ end $$;
 set request.jwt.claims = '{"role":"anon"}';
 reset role;
 select 'PAGAMENTO ONLINE OK' as resultado;
+-- ===== Entregadores e rotas =====
+do $$ declare u public.units; n int; i int; oid uuid;
+begin
+  select * into u from public.units where slug = 'bella-massa';
+  for i in 1..3 loop
+    update public.units set order_counter = order_counter + 1 where id = u.id returning order_counter into n;
+    insert into public.orders (tenant_id, unit_id, number, channel, type, status, customer_name, customer_phone, address,
+      subtotal_cents, delivery_fee_cents, total_cents, payment_method, payment_status, change_for_cents, accepted_at)
+    values (u.tenant_id, u.id, n, 'web', 'delivery', (case when i = 3 then 'preparing' else 'ready' end)::public.order_status, 'Cliente ' || i, '3190000000' || i,
+      jsonb_build_object('street','Rua ' || i, 'number', '10', 'neighborhood','Centro', 'lat', -19.93 + i * 0.01 * (4 - i), 'lng', -43.94),
+      3000, 800, 3800, case when i = 1 then 'pix'::public.payment_method else 'cash'::public.payment_method end,
+      case when i = 1 then 'paid'::public.payment_status else 'pending'::public.payment_status end, case when i = 2 then 5000 end, now())
+    returning id into oid;
+    insert into public.payments (tenant_id, order_id, method, amount_cents, status)
+    values (u.tenant_id, oid, case when i = 1 then 'pix'::public.payment_method else 'cash'::public.payment_method end, 3800,
+            case when i = 1 then 'paid'::public.payment_status else 'pending'::public.payment_status end);
+    perform set_config('test.dl_o' || i, oid::text, false);
+  end loop;
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; c uuid; c2 uuid; b uuid; tk text; r jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  c := public.courier_save(null, u, '{"name":"João Motoboy","phone":"(31) 98888-7777","fee_mode":"fixed","fee_value":600}'::jsonb);
+  c2 := public.courier_save(null, u, '{"name":"Rita Bike","fee_mode":"delivery_fee","vehicle":"bike"}'::jsonb);
+  perform set_config('test.courier', c::text, false);
+  begin perform access_token from public.couriers limit 1; raise exception 'FALHA leu token do entregador';
+  exception when insufficient_privilege then null; end;
+  tk := public.courier_link(c); perform set_config('test.ctoken', tk, false);
+  -- primeiro atribui a Rita e troca para o João (troca permitida antes da saída)
+  perform public.courier_assign(array[current_setting('test.dl_o1')::uuid], c2);
+  b := public.courier_assign(array[current_setting('test.dl_o1')::uuid, current_setting('test.dl_o2')::uuid, current_setting('test.dl_o3')::uuid], c);
+  if (select count(*) from public.deliveries where batch_id = b) <> 3 then raise exception 'FALHA rota'; end if;
+  if (select count(*) from public.deliveries where order_id = current_setting('test.dl_o1')::uuid and status = 'assigned') <> 1 then raise exception 'FALHA troca'; end if;
+  if (select fee_cents from public.deliveries where batch_id = b limit 1) <> 600 then raise exception 'FALHA taxa'; end if;
+  if (select collect_cents from public.deliveries where order_id = current_setting('test.dl_o1')::uuid and status = 'assigned') <> 0 then raise exception 'FALHA pago online não cobra'; end if;
+  begin perform public.courier_assign(array[gen_random_uuid()], c); raise exception 'FALHA pedido inexistente';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+do $$ begin
+  perform set_config('test.d1', (select id::text from public.deliveries where order_id = current_setting('test.dl_o1')::uuid and status = 'assigned'), false);
+  perform set_config('test.d2', (select id::text from public.deliveries where order_id = current_setting('test.dl_o2')::uuid and status = 'assigned'), false);
+  perform set_config('test.d3', (select id::text from public.deliveries where order_id = current_setting('test.dl_o3')::uuid and status = 'assigned'), false);
+  perform set_config('test.o2tok', (select public_token from public.orders where id = current_setting('test.dl_o2')::uuid), false);
+end $$;
+set role anon;
+do $$ declare tk text := current_setting('test.ctoken'); p jsonb;
+  d1 uuid := current_setting('test.d1')::uuid; d2 uuid := current_setting('test.d2')::uuid; d3 uuid := current_setting('test.d3')::uuid;
+begin
+  if public.courier_portal('00000000000000000000000000000000') is not null then raise exception 'FALHA token falso'; end if;
+  p := public.courier_portal(tk);
+  if jsonb_array_length(p->'deliveries') <> 3 then raise exception 'FALHA portal %', p; end if;
+  begin perform public.courier_action(tk, d3, 'pickup'); raise exception 'FALHA saiu em preparo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.courier_action(tk, d1, 'deliver', 'cash'); raise exception 'FALHA entregou sem sair';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.courier_action(tk, d1, 'pickup'); perform public.courier_action(tk, d2, 'pickup');
+  if public.get_order_by_token(current_setting('test.o2tok'))->>'status' <> 'dispatched' then raise exception 'FALHA dispatched'; end if;
+  if public.get_order_by_token(current_setting('test.o2tok'))->'courier'->>'name' <> 'João' then raise exception 'FALHA nome no acompanhamento'; end if;
+  perform public.courier_action(tk, d1, 'deliver', null);
+  begin perform public.courier_action(tk, d2, 'deliver', null); raise exception 'FALHA sem forma de pagamento';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.courier_action(tk, d2, 'deliver', 'cash');
+  if (public.get_order_by_token(current_setting('test.o2tok'))->>'status') || (public.get_order_by_token(current_setting('test.o2tok'))->>'payment_status') <> 'completedpaid' then raise exception 'FALHA concluído'; end if;
+  -- outro entregador não mexe na entrega
+  begin perform public.courier_action(md5('x'), d3, 'fail', null, 'teste'); raise exception 'FALHA token alheio';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.courier_action(tk, d3, 'fail', null, 'Cliente ausente');
+  if (public.courier_portal(tk)->'today'->>'delivered')::int <> 2 then raise exception 'FALHA resumo'; end if;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare c uuid := current_setting('test.courier')::uuid; b jsonb; r jsonb; u uuid; e0 int;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  b := public.courier_open_balance(c);
+  if (b->>'deliveries')::int <> 2 or (b->>'fees_cents')::int <> 1200 or (b->>'cash_cents')::int <> 3800 then raise exception 'FALHA saldo %', b; end if;
+  if not (public.cash_status(u)->>'open')::boolean then perform public.cash_open(u, 0); end if;
+  e0 := (public.cash_status(u)->'expected'->>'cash')::int;
+  r := public.courier_settle(c, 3800, true, 'acerto do dia');
+  if (r->>'difference_cents')::int <> 0 then raise exception 'FALHA diferença %', r; end if;
+  -- caixa: +38,00 do entregador −12,00 de taxas
+  if (public.cash_status(u)->'expected'->>'cash')::int - e0 <> 2600 then raise exception 'FALHA caixa %', (public.cash_status(u)->'expected'->>'cash')::int - e0; end if;
+  if not exists (select 1 from public.fin_entries where category = 'Entregadores' and amount_cents = 1200 and paid_at is not null) then raise exception 'FALHA financeiro'; end if;
+  if (public.courier_open_balance(c)->>'deliveries')::int <> 0 then raise exception 'FALHA saldo zerado'; end if;
+  begin perform public.courier_settle(c, 0, false, null); raise exception 'FALHA acerto vazio';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+select 'ENTREGADORES OK' as resultado;
