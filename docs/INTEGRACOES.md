@@ -73,3 +73,10 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - Valor aprovado diferente do pedido não confirma. Pagamento aprovado com pedido cancelado ou já pago gera estorno automático. Cancelar um pedido pago online estorna sozinho (`POST /v1/payments/{id}/refunds`), com novas tentativas.
 - O Pix do Mercado Pago precisa ter pelo menos 30 minutos de validade. Se o cliente pagar depois de o pedido expirar, o valor é estornado automaticamente.
 - Teste de ponta a ponta (12/11/2026, credenciais falsas): o Mercado Pago real recusou o token; o webhook recusou a assinatura forjada (401); o Pix mostrou o erro do provedor; a política de segurança da página do pedido não bloqueia nada do SDK.
+
+## Entregadores e rotas
+
+- Entregador sem login: cada um tem um link próprio (`/entregador/<token>`, 128 bits aleatórios) que só mostra as entregas atribuídas a ele e só enquanto estiverem em andamento. "Gerar novo link" invalida o anterior. Só a gerência lê o link.
+- Rota: ordem sugerida pelo vizinho mais próximo a partir da loja; "Abrir rota no mapa" usa o Google Maps com paradas, sem chave de API.
+- Saída só com o pedido pronto; "Entreguei" exige a forma de pagamento quando há valor a cobrar; "Não consegui entregar" volta o pedido para pronto.
+- Acerto: taxas do entregador (fixa, a taxa de entrega cobrada ou percentual) contra o dinheiro recebido dos clientes; entra no caixa aberto e lança a conta a pagar "Entregadores" no Financeiro.

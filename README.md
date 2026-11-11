@@ -21,7 +21,7 @@ Base técnica: **Next.js 16 (App Router) + Supabase (Postgres 17, Auth, Realtime
 | Equipe | Convite por e-mail, 7 perfis, limite de desconto por pessoa |
 | Gestão | Histórico de pedidos com filtros e CSV, análise de vendas com comparação de período; Dashboard (faturamento, pedidos, ticket médio, preparo médio, por hora/dia/pagamento/tipo, mais vendidos), configurações de horário, pagamentos e loja |
 
-Próximas fases (ver `docs/ROADMAP.md`): IA no WhatsApp (Domma Chat), iFood, app do entregador, PDV offline/TEF.
+Próximas fases (ver `docs/ROADMAP.md`): IA no WhatsApp (Domma Chat), iFood, PDV offline/TEF.
 
 ## Rodando localmente
 
