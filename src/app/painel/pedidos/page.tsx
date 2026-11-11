@@ -395,11 +395,11 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
         <div className="space-y-3 text-sm">
           <div>
             <p className="font-semibold">{o.customer_name}</p>
-            <p className="text-zinc-600">
+            {/^0+$/.test(phone) ? null : <p className="text-zinc-600">
               {formatPhone(o.customer_phone)} · <a className="text-green-700 hover:underline" href={wa} target="_blank" rel="noopener noreferrer">WhatsApp ↗</a>
               {!marketplace && phone.length >= 10 && <> · <a className="text-green-700 hover:underline" href={waStatus} target="_blank" rel="noopener noreferrer"
                 title="Abre o WhatsApp com a mensagem do status atual">Avisar status ↗</a></>}
-            </p>
+            </p>}
           </div>
           <p className="flex flex-wrap items-center gap-2"><span className="text-zinc-500">Origem:</span> <ChannelBadge channel={o.channel} size="md" />
             {o.channel === "web" && <span>Cardápio próprio</span>}
@@ -416,7 +416,7 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
             </div>
           )}
           <div>
-            <p><span className="text-zinc-500">Pagamento:</span> {PAYMENT_LABEL[o.payment_method] ?? o.payment_method}
+            <p><span className="text-zinc-500">Pagamento:</span> {o.channel === "totem" && o.payment_method === "cash" && o.payment_status !== "paid" ? "No caixa" : PAYMENT_LABEL[o.payment_method] ?? o.payment_method}
               {" "}<span className={o.payment_status === "paid" ? "text-green-700" : "text-amber-700"}>({o.payment_status === "paid" ? "pago" : "pendente"})</span></p>
             <GatewayBlock gp={gp} />
             {o.change_for_cents != null && <p className="font-semibold">Troco para {brl(o.change_for_cents)} (levar {brl(o.change_for_cents - o.total_cents)})</p>}
