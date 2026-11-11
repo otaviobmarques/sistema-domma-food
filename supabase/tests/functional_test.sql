@@ -605,3 +605,91 @@ do $$ begin
 end $$;
 reset role;
 select 'TOKEN OK' as resultado;
+-- ===== Pagamento online (Mercado Pago) =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  perform set_config('test.unit', u::text, false);
+  begin perform public.gateway_save_settings(u, '{"enabled":true}'::jsonb, null, null); raise exception 'FALHA ativou sem credencial';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.gateway_save_settings(u, '{}'::jsonb, 'token-qualquer', null); raise exception 'FALHA token inválido aceito';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.gateway_save_settings(u, '{"public_key":"TEST-1234abcd-5678-efgh-9012-ijklmnopqrst","card_enabled":true,"max_installments":3}'::jsonb,
+    'TEST-1234567890123456-111111-abcdefabcdefabcdefabcdefabcdef12-123456789', 'segredo-do-webhook-123456');
+  begin perform public.gateway_save_settings(u, '{"enabled":true}'::jsonb, null, null); raise exception 'FALHA ativou sem teste';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ begin perform public.gateway_test_result(current_setting('test.unit')::uuid, true, 'ok'); end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ begin
+  perform public.gateway_save_settings(current_setting('test.unit')::uuid, '{"enabled":true}'::jsonb, null, null);
+  if not ('online_card' = any ((select accepted_payments from public.units where id = current_setting('test.unit')::uuid)::text[])) then raise exception 'FALHA online_card'; end if;
+end $$;
+reset role;
+set role anon;
+do $$ declare pid uuid := current_setting('test.pid')::uuid; r jsonb; g jsonb;
+begin
+  g := public.get_store('bella-massa')->'unit'->'gateway';
+  if g->>'public_key' is null or (g->>'card')::boolean is not true or g ? 'token' then raise exception 'FALHA store gateway %', g; end if;
+  r := public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','online_card',
+        'customer', jsonb_build_object('name','Paula Cartão','phone','31944440001'),
+        'items', jsonb_build_array(jsonb_build_object('product_id',pid,'quantity',1))));
+  if r->>'status' <> 'awaiting_payment' then raise exception 'FALHA status cartão %', r; end if;
+  perform set_config('test.gw_token', r->>'token', false);
+  if public.get_order_by_token(r->>'token')->'gateway'->'config'->>'public_key' is null then raise exception 'FALHA order gateway'; end if;
+  if public.get_order_by_token(r->>'token')->'pix' <> 'null'::jsonb and public.get_order_by_token(r->>'token')->>'pix' is not null then raise exception 'FALHA pix estático com gateway'; end if;
+  begin perform public.gateway_context(r->>'token'); raise exception 'FALHA anon leu contexto';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare c jsonb; gp uuid; gp2 uuid; st text; oid uuid;
+begin
+  c := public.gateway_context(current_setting('test.gw_token'));
+  if c->>'token' not like 'TEST-%' or (c->>'total_cents')::int <> 2990 then raise exception 'FALHA contexto %', c; end if;
+  oid := (c->>'order_id')::uuid;
+  gp := public.gateway_begin(oid, 'card', 2990);
+  -- valor diferente do pedido não confirma
+  st := public.gateway_record(gp, '{"id":"9001","status":"approved","transaction_amount":1.00}'::jsonb);
+  if st <> 'error' or (select payment_status from public.orders where id = oid) = 'paid' then raise exception 'FALHA valor adulterado %', st; end if;
+  gp := public.gateway_begin(oid, 'card', 2990);
+  st := public.gateway_record(gp, '{"id":"9002","status":"rejected","status_detail":"cc_rejected_insufficient_amount","transaction_amount":29.90}'::jsonb);
+  if st <> 'rejected' then raise exception 'FALHA rejeitado %', st; end if;
+  gp := public.gateway_begin(oid, 'card', 2990);
+  st := public.gateway_record(gp, '{"id":"9003","status":"approved","transaction_amount":29.90,"installments":2,"card":{"last_four_digits":"4242"},"payment_method_id":"visa"}'::jsonb);
+  if st <> 'paid' or (select payment_status from public.orders where id = oid) <> 'paid'
+     or (select status from public.orders where id = oid) not in ('pending','preparing') then raise exception 'FALHA aprovado %', st; end if;
+  if public.gateway_find(current_setting('test.unit')::uuid, '9003') <> gp then raise exception 'FALHA find'; end if;
+  -- segundo pagamento aprovado para o mesmo pedido: estorno automático
+  gp2 := public.gateway_begin(oid, 'card', 2990);
+  st := public.gateway_record(gp2, '{"id":"9004","status":"approved","transaction_amount":29.90}'::jsonb);
+  if st <> 'refund_needed' or (select refund_status from public.gateway_payments where id = gp2) <> 'requested' then raise exception 'FALHA duplicado %', st; end if;
+  perform set_config('test.gw_order', oid::text, false);
+  perform set_config('test.gw_gp', gp::text, false);
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ begin
+  perform public.set_order_status(current_setting('test.gw_order')::uuid, 'cancelled', 'teste estorno');
+  if (select refund_status from public.gateway_payments where id = current_setting('test.gw_gp')::uuid) <> 'requested' then raise exception 'FALHA estorno no cancelamento'; end if;
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; x jsonb;
+begin
+  j := public.gateway_refund_jobs();
+  if jsonb_array_length(j) <> 2 then raise exception 'FALHA jobs %', j; end if;
+  for x in select * from jsonb_array_elements(j) loop perform public.gateway_refund_result((x->>'id')::uuid, true, 'ok'); end loop;
+  if exists (select 1 from public.gateway_payments where order_id = current_setting('test.gw_order')::uuid and status = 'approved') then raise exception 'FALHA refund'; end if;
+end $$;
+set request.jwt.claims = '{"role":"anon"}';
+reset role;
+select 'PAGAMENTO ONLINE OK' as resultado;
