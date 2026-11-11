@@ -1399,3 +1399,68 @@ do $$ begin
 end $$;
 reset role;
 select 'TOTEM OK' as resultado;
+
+-- =====================================================================
+-- PIXEL / GA4 / FUNIL
+-- =====================================================================
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; s text; r jsonb;
+begin
+  select id, slug into u, s from public.units where tenant_id = (select tenant_id from public.memberships where user_id = auth.uid() limit 1) order by created_at limit 1;
+  perform set_config('test.funit', u::text, false); perform set_config('test.fslug', s, false);
+  begin perform public.tracking_save(u, '{"meta_pixel_id":"abc"}'); raise exception 'FALHA pixel inválido'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.tracking_save(u, '{"ga4_id":"UA-1234-1"}'); raise exception 'FALHA ga inválido'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.tracking_save(u, '{"ads_label":"abcdEF12"}'); raise exception 'FALHA rótulo sem ads'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.tracking_save(u, '{"meta_pixel_id":" 1234567890123456 ","ga4_id":"g-ab12cd34ef","ads_id":"aw-123456789","ads_label":"abcdEF12"}');
+  r := public.tracking_get(u);
+  if r->>'meta_pixel_id' <> '1234567890123456' or r->>'ga4_id' <> 'G-AB12CD34EF' or r->>'ads_id' <> 'AW-123456789' then raise exception 'FALHA salvar %', r; end if;
+end $$;
+-- caixa (2222) não configura; cozinha (4444) não vê relatório
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  begin perform public.tracking_save(current_setting('test.funit')::uuid, '{}'); raise exception 'FALHA caixa configurou'; exception when insufficient_privilege then null; end;
+  if exists (select 1 from public.unit_tracking) then raise exception 'FALHA caixa leu a tabela'; end if;
+end $$;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.funnel_report(current_setting('test.funit')::uuid, 30); raise exception 'FALHA cozinha viu o funil'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role anon;
+do $$ declare st jsonb; s1 uuid := gen_random_uuid(); s2 uuid := gen_random_uuid(); sl text := current_setting('test.fslug');
+begin
+  st := public.get_store(sl);
+  if st->'unit'->'tracking'->>'meta_pixel_id' <> '1234567890123456' or st->'unit'->'tracking'->>'ads_label' <> 'abcdEF12' then raise exception 'FALHA get_store tracking %', st->'unit'->'tracking'; end if;
+  perform public.funnel_track(sl, s1, 'visit', 'Instagram');
+  perform public.funnel_track(sl, s1, 'visit', 'instagram');            -- repetido: conta uma vez
+  perform public.funnel_track(sl, s1, 'add_to_cart', 'instagram');
+  perform public.funnel_track(sl, s1, 'checkout', 'instagram');
+  perform public.funnel_track(sl, s1, 'order', 'instagram', 5000);
+  perform public.funnel_track(sl, s2, 'visit', null);
+  perform public.funnel_track(sl, s2, 'hack', null);                    -- passo inválido: ignora
+  perform public.funnel_track('nao-existe', s2, 'visit', null);
+  begin perform public.funnel_report(current_setting('test.funit')::uuid, 30); raise exception 'FALHA anon relatório'; exception when insufficient_privilege then null; end;
+  begin perform public.tracking_get(current_setting('test.funit')::uuid); raise exception 'FALHA anon tracking_get'; exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.store_funnel; raise exception 'FALHA anon leu o funil'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare r jsonb;
+begin
+  r := public.funnel_report(current_setting('test.funit')::uuid, 30);
+  if (r->'steps'->>'visit')::int <> 2 or (r->'steps'->>'add_to_cart')::int <> 1 or (r->'steps'->>'order')::int <> 1
+     or (r->'steps'->>'order_value_cents')::int <> 5000 then raise exception 'FALHA relatório %', r; end if;
+  if not exists (select 1 from jsonb_array_elements(r->'sources') x where x->>'source' = 'instagram' and (x->>'orders')::int = 1) then raise exception 'FALHA origem %', r->'sources'; end if;
+  if not exists (select 1 from jsonb_array_elements(r->'sources') x where x->>'source' = 'direto') then raise exception 'FALHA direto'; end if;
+  perform public.tracking_save(current_setting('test.funit')::uuid, '{}');
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  if public.get_store(current_setting('test.fslug'))->'unit'->'tracking' <> 'null'::jsonb then raise exception 'FALHA limpar tracking'; end if;
+end $$;
+reset role;
+select 'RASTREAMENTO OK' as resultado;

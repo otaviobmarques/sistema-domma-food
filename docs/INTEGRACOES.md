@@ -164,3 +164,31 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
   - **Pagar no caixa:** o pedido entra marcado "PAGAR NO CAIXA". Em Pedidos, o botão **Receber no caixa** (`order_receive`) registra a forma de pagamento e o troco no caixa aberto.
   - Cartão direto no totem (TEF/maquininha integrada) ainda não é suportado. Nesse caso, o cliente paga no caixa.
 - **Proteções:** limite de 15 pedidos a cada 10 minutos por totem, teto de valor por pedido, loja fechada não aceita pedidos e totem desativado para na hora.
+
+## Pixel do Meta, Google Analytics 4 e funil de conversão
+
+- **Painel › Marketing › Anúncios e métricas** (dono e gerência, por loja):
+  - IDs da loja: Pixel do Meta (só números), GA4 (`G-…`) e, se quiser, a conversão de compra do Google Ads (`AW-…` + rótulo).
+  - Os IDs são validados no banco (`tracking_save`) e vão para o cardápio pelo `get_store` (`unit.tracking`). Não há segredo: esses IDs aparecem no HTML de qualquer site que usa as ferramentas.
+- **Eventos enviados pelo cardápio:**
+
+  | Momento | Meta Pixel | GA4 |
+  | --- | --- | --- |
+  | Abriu o cardápio | `PageView` | `page_view` |
+  | Abriu um produto | `ViewContent` | `view_item` |
+  | Adicionou à sacola | `AddToCart` | `add_to_cart` |
+  | Abriu o checkout | `InitiateCheckout` | `begin_checkout` |
+  | Fez o pedido | `Purchase` (valor, `eventID` = id do pedido) | `purchase` (`transaction_id` = id do pedido) e conversão do Google Ads |
+
+  - O token público do pedido nunca é enviado às ferramentas.
+- **LGPD:**
+  - Se a loja tem algum ID, o cardápio mostra um aviso de cookies.
+  - Pixel e gtag só carregam depois do **Aceitar**. Recusar não muda nada no pedido.
+  - A escolha fica guardada no aparelho (`df_consent_v1`).
+- **Funil do Domma (`funnel_track` / `funnel_report`):**
+  - Contagem própria, anônima e sem cookies: um id aleatório por sessão do navegador (`sessionStorage`) conta uma vez em cada etapa. As etapas são visita, produto, sacola, checkout e pedido.
+  - A origem vem de `utm_source`. Sem ela, vem de `fbclid`/`gclid` ou do site de onde o cliente veio; o resto conta como "direto". O painel tem links prontos com `utm_source`.
+  - Os dados ficam guardados por 180 dias (cron `domma-funnel-purge`).
+- **Segurança (CSP):**
+  - Os domínios do Meta e do Google só são liberados nas páginas públicas da loja: `/loja/*`, `/pedido/*` e domínio próprio.
+  - O painel e o admin continuam com a política fechada.

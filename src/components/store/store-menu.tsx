@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { brl } from "@/lib/format";
 import { Modal } from "@/components/ui";
 import { effectivePrice, useCart } from "./cart";
@@ -8,6 +8,8 @@ import { ProductModal, Stepper } from "./product-modal";
 import type { Store, StoreProduct } from "./types";
 import { storeColor } from "./brand";
 import { LoyaltyBanner, RatingChip, useStoreExtras } from "./loyalty";
+import { ConsentBanner } from "./consent";
+import { funnel, trackEvent } from "@/lib/tracking";
 
 const TAG_LABEL: Record<string, string> = { novo: "Novo", vegano: "Vegano", picante: "Picante", vegetariano: "Vegetariano", "sem-gluten": "Sem glúten" };
 
@@ -20,6 +22,7 @@ export function StoreMenu({ store }: { store: Store }) {
   const [cartOpen, setCartOpen] = useState(false);
   const [toast, setToast] = useState("");
   const { loyalty, reviews } = useStoreExtras(unit.slug);
+  useEffect(() => { funnel(unit.slug, "visit"); }, [unit.slug]);
 
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const filtered = useMemo(() => {
@@ -37,6 +40,8 @@ export function StoreMenu({ store }: { store: Store }) {
   function pick(p: StoreProduct, catAvail: boolean) {
     if (!availableIn(catAvail, p)) return;
     setOpen(p);
+    funnel(unit.slug, "view_item");
+    trackEvent(unit.tracking, { name: "view_item", items: [{ id: p.id, name: p.name, price_cents: p.promo_price_cents ?? p.price_cents, quantity: 1 }] });
   }
 
   return (
@@ -188,7 +193,12 @@ export function StoreMenu({ store }: { store: Store }) {
 
       {open && (
         <ProductModal product={open} color={color} onClose={() => setOpen(null)}
-          onAdd={(i) => { cart.add(i); setOpen(null); setToast(`${i.name} adicionado à sacola`); setTimeout(() => setToast(""), 2000); }} />
+          onAdd={(i) => {
+            cart.add(i);
+            funnel(unit.slug, "add_to_cart");
+            trackEvent(unit.tracking, { name: "add_to_cart", items: [{ id: i.product_id, name: i.name, price_cents: i.unit_price_cents, quantity: i.quantity }] });
+            setOpen(null); setToast(`${i.name} adicionado à sacola`); setTimeout(() => setToast(""), 2000);
+          }} />
       )}
 
       <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4">
@@ -236,6 +246,7 @@ export function StoreMenu({ store }: { store: Store }) {
           </>
         )}
       </Modal>
+      <ConsentBanner tracking={unit.tracking} color={color} />
     </div>
   );
 }
