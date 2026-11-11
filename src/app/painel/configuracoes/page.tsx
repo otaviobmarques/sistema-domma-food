@@ -1,8 +1,9 @@
 "use client";
+import { DomainCard } from "./domain";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { usePanel } from "@/lib/panel/context";
+import { canManage, usePanel } from "@/lib/panel/context";
 import { Alert, Field, Toggle } from "@/components/ui";
 import { centsToInput, errorMessage, PAYMENT_LABEL, parseBRL } from "@/lib/format";
 
@@ -93,6 +94,7 @@ export default function Configuracoes() {
   const openMode = u.is_open_override === null ? "auto" : u.is_open_override ? "open" : "closed";
 
   return (
+    <div className="space-y-6">
     <form onSubmit={save} className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="h1">Configurações</h1>
@@ -259,5 +261,7 @@ export default function Configuracoes() {
         </section>
       )}
     </form>
+    {canManage(role) && <DomainCard />}
+    </div>
   );
 }
