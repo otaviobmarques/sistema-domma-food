@@ -4,6 +4,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePanel } from "@/lib/panel/context";
 import { Alert, Empty, Modal, Toggle } from "@/components/ui";
 import { EmitButton } from "@/components/fiscal/emit-button";
+import { GatewayBlock, useOrderGateway } from "../pagamentos/shared";
 import {
   brl, errorMessage, formatPhone, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM, TYPE_LABEL,
 } from "@/lib/format";
@@ -13,7 +14,7 @@ import { ChannelBadge, channelLabel, isMarketplace } from "@/components/channel-
 
 
 const COLUMNS: { key: string; title: string; statuses: string[]; color: string }[] = [
-  { key: "pix", title: "Aguardando Pix", statuses: ["awaiting_payment"], color: "bg-amber-500" },
+  { key: "pix", title: "Aguardando pagamento", statuses: ["awaiting_payment"], color: "bg-amber-500" },
   { key: "new", title: "Novos", statuses: ["pending"], color: "bg-red-500" },
   { key: "prep", title: "Em preparo", statuses: ["preparing"], color: "bg-orange-500" },
   { key: "ready", title: "Pronto", statuses: ["ready"], color: "bg-sky-500" },
@@ -354,6 +355,8 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
   const [reason, setReason] = useState("");
   const orderId = order?.id;
   const orderStatus = order?.status;
+  const online = order?.payment_method === "pix" || order?.payment_method === "online_card";
+  const gp = useOrderGateway(online ? orderId : undefined, `${orderStatus}-${order?.payment_status}`);
 
   useEffect(() => {
     setCancelling(false); setReason("");
@@ -409,6 +412,7 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
           <div>
             <p><span className="text-zinc-500">Pagamento:</span> {PAYMENT_LABEL[o.payment_method] ?? o.payment_method}
               {" "}<span className={o.payment_status === "paid" ? "text-green-700" : "text-amber-700"}>({o.payment_status === "paid" ? "pago" : "pendente"})</span></p>
+            <GatewayBlock gp={gp} />
             {o.change_for_cents != null && <p className="font-semibold">Troco para {brl(o.change_for_cents)} (levar {brl(o.change_for_cents - o.total_cents)})</p>}
             {o.coupon_code && <p><span className="text-zinc-500">Cupom:</span> {o.coupon_code}</p>}
           </div>
@@ -454,7 +458,9 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
           <input id="cancel-reason" className="input" autoFocus maxLength={300} value={reason}
             onChange={(e) => setReason(e.target.value)} placeholder="Ex.: cliente desistiu, item em falta..."
             onKeyDown={(e) => { if (e.key === "Enter") void doCancel(); }} />
-          {o.payment_status === "paid" && <p className="text-xs text-red-800">Este pedido já foi pago: faça o estorno ao cliente.</p>}
+          {o.payment_status === "paid" && (gp?.status === "approved"
+            ? <p className="text-xs text-red-800">O valor será estornado automaticamente no Mercado Pago.</p>
+            : <p className="text-xs text-red-800">Este pedido já foi pago: faça o estorno ao cliente.</p>)}
           <div className="flex gap-2">
             <button className="btn-danger" disabled={busy || !reason.trim()} onClick={() => void doCancel()}>Confirmar cancelamento</button>
             <button className="btn-ghost" onClick={() => setCancelling(false)}>Voltar</button>
@@ -462,7 +468,7 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
         </div>
       ) : (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-200 pt-4">
-          {o.status === "awaiting_payment" && <button className="btn-success" disabled={busy} onClick={onConfirmPix}>Confirmar Pix</button>}
+          {o.status === "awaiting_payment" && o.payment_method === "pix" && <button className="btn-success" disabled={busy} onClick={onConfirmPix}>Confirmar Pix</button>}
           {action && <button className="btn-primary" disabled={busy} onClick={() => void onAction(action.status)}>{action.label}</button>}
           <button className="btn-secondary" onClick={() => printTicket(o, unitName)}>🖨 Imprimir</button>
           {canCancel && <button className="btn-ghost ml-auto text-red-700" onClick={() => setCancelling(true)}>Cancelar pedido</button>}

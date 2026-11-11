@@ -27,6 +27,7 @@ const ICONS: Record<string, React.ReactNode> = {
   box: <><path d="m21 8-9-5-9 5v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5M12 13v8" /></>,
   wallet: <><path d="M4 7a2 2 0 0 1 2-2h12v4" /><path d="M4 7v11a2 2 0 0 0 2 2h14V9H6a2 2 0 0 1-2-2Z" /><path d="M16 14.5h.01" /></>,
   ledger: <><path d="M6 3h11a2 2 0 0 1 2 2v16l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1Z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
+  card: <><rect x="2.5" y="5" width="19" height="14" rx="2" /><path d="M2.5 10h19M6 15h4" /></>,
   receipt: <><path d="M6 3h12v18l-2.5-1.5L13 21l-2.5-1.5L8 21l-2-1.5V3Z" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
@@ -57,6 +58,7 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; cashie
   { href: "/painel/integracoes", label: "Integrações", icon: "plug", manage: true },
   { href: "/painel/clientes", label: "Clientes", icon: "customers", manage: true },
   { href: "/painel/equipe", label: "Equipe", icon: "team", manage: true, section: "Conta" },
+  { href: "/painel/pagamentos", label: "Pagamento online", icon: "card", manage: true },
   { href: "/painel/fiscal", label: "Nota fiscal", icon: "receipt", manage: true },
   { href: "/painel/configuracoes", label: "Configurações", icon: "settings", manage: true },
   { href: "/painel/seguranca", label: "Segurança", icon: "shield" },

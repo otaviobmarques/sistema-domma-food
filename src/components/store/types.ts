@@ -19,7 +19,9 @@ export type StoreUnit = {
   state: string | null; has_location: boolean; is_open: boolean; opening_hours: Record<string, [string, string][]>;
   accepts_delivery: boolean; accepts_pickup: boolean; accepts_scheduling: boolean; min_order_cents: number;
   prep_time_min: number; pickup_time_min: number; accepted_payments: string[];
+  gateway?: StoreGateway | null;
 };
+export type StoreGateway = { provider: string; pix: boolean; card: boolean; public_key: string; max_installments: number };
 export type Store = { unit: StoreUnit; zones: StoreZone[]; menu: StoreCategory[] };
 
 export type CartOption = { option_id: string; name: string; price_cents: number; quantity: number; group: string };

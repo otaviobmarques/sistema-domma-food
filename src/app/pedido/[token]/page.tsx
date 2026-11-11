@@ -7,6 +7,7 @@ import { brl, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM } from "@/lib/form
 import { pixPayload } from "@/lib/pix";
 import { storeColor } from "@/components/store/brand";
 import { StarInput, Stars } from "@/components/store/loyalty";
+import { OnlinePayment, PaymentNote, type OrderGateway } from "./online-payment";
 
 type Order = {
   number: number; status: string; type: "delivery" | "pickup" | "dine_in"; customer_name: string;
@@ -15,6 +16,7 @@ type Order = {
   payment_method: string; payment_status: string; change_for_cents: number | null; cancel_reason: string | null;
   address: { street: string; number: string; neighborhood: string } | null;
   pix: { key: string | null; merchant_name: string | null; merchant_city: string | null; expires_at: string } | null;
+  gateway?: OrderGateway | null;
   unit: { name: string; slug: string; whatsapp: string | null; phone: string | null; logo_url: string | null; primary_color: string };
   items: { name: string; quantity: number; total_cents: number; options: { name: string; quantity: number }[]; notes: string | null }[];
   events: { status: string; at: string }[];
@@ -65,11 +67,12 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+  const fastPoll = order?.status === "awaiting_payment" && !!order?.gateway?.config;
   useEffect(() => {
     if (!order || FINAL.includes(order.status)) return;
-    const id = setInterval(load, 8000);
+    const id = setInterval(load, fastPoll ? 4000 : 8000);
     return () => clearInterval(id);
-  }, [order, load]);
+  }, [order, load, fastPoll]);
   useEffect(() => {
     if (!order?.pix) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -96,7 +99,7 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
 
   const color = storeColor(order.unit.primary_color);
   const steps = ["awaiting_payment", "pending", "preparing", "ready", order.type === "delivery" ? "dispatched" : "awaiting_pickup", "completed"]
-    .filter((s) => s !== "awaiting_payment" || order.payment_method === "pix");
+    .filter((s) => s !== "awaiting_payment" || order.payment_method === "pix" || order.payment_method === "online_card");
   const at = (s: string) => order.events.filter((e) => e.status === s).at(-1)?.at;
   const currentIdx = steps.indexOf(order.status);
   const cancelled = order.status === "cancelled";
@@ -157,6 +160,11 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
           )}
         </section>
       )}
+
+      {order.gateway?.config && order.status === "awaiting_payment" && order.payment_status !== "paid" && (
+        <OnlinePayment token={token} method={order.payment_method} totalCents={order.total_cents} gateway={order.gateway} color={color} onChange={load} />
+      )}
+      {order.gateway && order.status !== "awaiting_payment" && <PaymentNote payment={order.gateway.payment} />}
 
       {cancelled ? (
         <section className="card mt-4 border-red-200 bg-red-50 text-red-900">
