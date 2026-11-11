@@ -11,10 +11,16 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: memberships } = await sb
+  const loadMemberships = () => sb
     .from("memberships")
     .select("tenant_id, role, unit_ids, tenants(name, status, trial_ends_at)")
     .eq("user_id", user.id);
+  let { data: memberships } = await loadMemberships();
+  if (!memberships?.length) {
+    // convites pendentes para este e-mail viram acesso no primeiro login
+    const { data: accepted } = await sb.rpc("accept_invitations");
+    if (accepted) ({ data: memberships } = await loadMemberships());
+  }
   if (!memberships?.length) {
     const { data: admin } = await sb.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
     redirect(admin ? "/admin" : "/onboarding");

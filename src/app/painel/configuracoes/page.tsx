@@ -14,7 +14,7 @@ type Unit = {
   opening_hours: Hours; is_open_override: boolean | null; accepts_delivery: boolean; accepts_pickup: boolean;
   accepts_scheduling: boolean; auto_accept: boolean; min_order_cents: number; prep_time_min: number; pickup_time_min: number;
   accepted_payments: string[]; pix_key: string | null; pix_merchant_name: string | null; pix_merchant_city: string | null;
-  pix_expires_min: number; logo_url: string | null; cover_url: string | null; primary_color: string;
+  pix_expires_min: number; service_fee_pct: number; kds_stations: string[]; logo_url: string | null; cover_url: string | null; primary_color: string;
 };
 
 const DAYS: [string, string][] = [["mon", "Segunda"], ["tue", "Terça"], ["wed", "Quarta"], ["thu", "Quinta"], ["fri", "Sexta"], ["sat", "Sábado"], ["sun", "Domingo"]];
@@ -122,6 +122,39 @@ export default function Configuracoes() {
           <Field label="Pedido mínimo (R$)"><input className="input" inputMode="decimal" value={minOrder} onChange={(e) => setMinOrder(e.target.value)} /></Field>
           <Field label="Tempo de preparo (min)"><input className="input" type="number" min={0} max={600} value={u.prep_time_min} onChange={(e) => set("prep_time_min", Number(e.target.value))} /></Field>
           <Field label="Tempo para retirada (min)"><input className="input" type="number" min={0} max={600} value={u.pickup_time_min} onChange={(e) => set("pickup_time_min", Number(e.target.value))} /></Field>
+        </div>
+      </section>
+
+      <section className="card space-y-3">
+        <h2 className="font-semibold">Salão e cozinha</h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Taxa de serviço (%)" hint="Sugerida no fechamento da mesa. O cliente pode recusar.">
+            <input className="input" type="number" min={0} max={30} step={0.5} value={u.service_fee_pct ?? 10}
+              onChange={(e) => set("service_fee_pct", Math.min(30, Math.max(0, Number(e.target.value))))} />
+          </Field>
+          <div className="sm:col-span-2">
+            <span className="label">Setores de preparo (KDS)</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {(u.kds_stations ?? []).map((st) => (
+                <span key={st} className="badge bg-zinc-100 px-2.5 py-1 text-sm capitalize text-zinc-800">
+                  {st}
+                  {(u.kds_stations ?? []).length > 1 && (
+                    <button type="button" className="ml-1.5 text-zinc-500 hover:text-red-600" aria-label={`Remover setor ${st}`}
+                      onClick={() => set("kds_stations", u.kds_stations.filter((x) => x !== st))}>✕</button>
+                  )}
+                </span>
+              ))}
+              <input className="input w-40" placeholder="Novo setor + Enter" maxLength={30} aria-label="Novo setor"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  const v = e.currentTarget.value.trim().toLowerCase();
+                  if (v && !(u.kds_stations ?? []).includes(v)) set("kds_stations", [...(u.kds_stations ?? []), v]);
+                  e.currentTarget.value = "";
+                }} />
+            </div>
+            <span className="mt-1 block text-xs text-zinc-500">Ex.: cozinha, bar, pizzas, chapa. Cada produto é enviado ao seu setor.</span>
+          </div>
         </div>
       </section>
 
