@@ -6,6 +6,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { Alert, Logo } from "@/components/ui";
 import { brl } from "@/lib/format";
 import { BillingSettings, type BillingAdmin } from "./billing";
+import { IfoodAppSettings } from "./ifood";
 
 type Tenant = {
   id: string; name: string; cnpj: string | null; plan_id: string; status: string; trial_ends_at: string; created_at: string;
@@ -85,6 +86,7 @@ export default function AdminPage() {
           ))}
         </div>
         {bill && <BillingSettings s={bill} onChanged={load} />}
+        <IfoodAppSettings />
         <section className="card">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">Empresas</h2>

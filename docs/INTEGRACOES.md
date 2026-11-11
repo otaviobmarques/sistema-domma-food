@@ -115,3 +115,23 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - **Webhook:** cada aviso é processado uma única vez, pelo `id` do evento. A Edge Function confere a cobrança no Asaas antes de aplicar, então não confia só no corpo do aviso.
 - **Rotina diária (6h23 de Brasília):** fim do teste, fim da carência e fim de assinatura cancelada.
 - Nota fiscal de serviço: pode ser emitida pelo próprio Asaas (configuração na conta do Asaas).
+
+## iFood (Merchant API)
+
+- O iFood não usa o Open Delivery. A integração é pela **Merchant API** oficial, com um **aplicativo distribuído** do Domma: um único app para toda a plataforma.
+- **Super admin (/admin):** informa o Client ID e o Client Secret do app, que ficam no Vault, e testa.
+  - O app é criado no Portal do Desenvolvedor iFood com os módulos Order, Merchant e Events.
+  - Precisa passar pela homologação do iFood antes de atender lojas reais.
+- **Loja (Integrações › iFood):**
+  1. Clica em **Conectar iFood** e recebe um código de vínculo.
+  2. Autoriza o Domma no Portal do Parceiro.
+  3. Cola o código de autorização que o portal mostra.
+
+  Os tokens da loja ficam no Vault e são renovados sozinhos. Se a conta enxergar mais de uma loja no iFood, a loja escolhe qual vincular.
+- **Pedidos:** consulta de eventos a cada **30 segundos** (cron), como o iFood exige para considerar a loja conectada, com confirmação de cada evento recebido. Pedido novo (`PLC`) é buscado inteiro na API e entra na fila de pedidos com o selo do iFood.
+  - Entrega pelo iFood ou pela loja. O código de coleta e o contato 0800 com localizador vão nas observações.
+  - O telefone do iFood não vira cadastro de cliente.
+- **Status, do Domma para o iFood:** aceitar → `confirm`; pronto → `readyToPickup`; saiu (entrega própria) → `dispatch`; cancelar → `requestCancellation`, com o motivo escolhido na lista do próprio iFood. Tudo passa pela fila com novas tentativas.
+- **Status, do iFood para o Domma:** confirmado no gestor do iFood (`CFM`), saiu (`DSP`), concluído (`CON`) e cancelado (`CAN`) são aplicados sem reenviar para o iFood.
+- **Cancelamento pedido pelo cliente:** chega pela plataforma de negociação (`HSD`) e aparece no pedido para a loja aceitar ou recusar (`disputes/{id}/accept|reject`).
+- Para ligar os itens do iFood aos produtos do Domma (estoque e relatórios), use o ID do produto do Domma como código PDV no cardápio do iFood.

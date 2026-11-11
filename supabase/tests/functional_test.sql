@@ -1142,3 +1142,123 @@ do $$ begin
   update public.tenants set status = 'active', cancel_at = null, suspended_reason = null where id = current_setting('test.bt')::uuid;
 end $$;
 select 'COBRANCA SAAS OK' as resultado;
+
+-- ===== iFood =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; r jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  r := public.ifood_overview(u);
+  if (r->>'app_ready')::boolean or r->'connection' <> 'null'::jsonb then raise exception 'FALHA estado inicial %', r; end if;
+  begin perform public.ifood_set_options(u, false, true); raise exception 'FALHA ativou sem conectar';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_ifood_save('abc12345-x', 'segredo-super-longo-123'); raise exception 'FALHA lojista salvou app';
+  exception when insufficient_privilege then null; end;
+  perform set_config('test.iu', u::text, false);
+end $$;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ begin
+  perform public.admin_ifood_save('a1b2c3d4-e5f6-7890-abcd-ef1234567890', 'segredo-do-app-ifood-123456');
+  if (public.admin_ifood_settings()->>'has_secret')::boolean is not true then raise exception 'FALHA app'; end if;
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare u uuid := current_setting('test.iu')::uuid; c uuid; ctx jsonb; oid uuid; r jsonb; o public.orders;
+begin
+  if public.ifood_app_secret()->>'client_secret' <> 'segredo-do-app-ifood-123456' then raise exception 'FALHA segredo do app'; end if;
+  c := public.ifood_save_user_code(u, 'HJLX-LPSQ', 'https://portal.ifood.com.br/apps/code?c=HJLX-LPSQ', 'verificador-secreto', 600);
+  ctx := public.ifood_auth_context(c);
+  if ctx->>'verifier' <> 'verificador-secreto' then raise exception 'FALHA verificador'; end if;
+  perform public.ifood_save_token(c, '{"access_token":"tok","refresh_token":"ref","expires_at":9999999999}'::jsonb);
+  ctx := public.ifood_auth_context(c);
+  if ctx->'token'->>'refresh_token' <> 'ref' or ctx->>'verifier' is not null then raise exception 'FALHA token %', ctx; end if;
+  perform public.ifood_set_merchant(c, 'merchant-uuid-1', 'Bella Massa iFood', '[{"id":"merchant-uuid-1","name":"Bella Massa iFood"}]');
+  if jsonb_array_length(public.ifood_connections()) <> 1 then raise exception 'FALHA conexões ativas'; end if;
+  -- pedido de entrega pago online, entregue pelo iFood
+  oid := public.ifood_ingest_order(c, '{
+    "id":"ifood-order-1","displayId":"7A2B","orderType":"DELIVERY","orderTiming":"IMMEDIATE","isTest":true,"extraInfo":"Sem cebola",
+    "customer":{"name":"João Cliente","phone":{"number":"0800 700 1234","localizer":"12345678"}},
+    "items":[{"name":"Pizza Margherita","externalCode":"x","quantity":1,"unitPrice":50,"totalPrice":56,"observations":"bem assada",
+              "options":[{"name":"Borda recheada","quantity":1,"unitPrice":6}]}],
+    "total":{"subTotal":56,"deliveryFee":7,"benefits":5,"additionalFees":0.99,"orderAmount":58.99},
+    "payments":{"prepaid":58.99,"pending":0,"methods":[{"value":58.99,"method":"CREDIT","type":"ONLINE"}]},
+    "delivery":{"mode":"DEFAULT","deliveredBy":"IFOOD","deliveryDateTime":"2026-11-13T20:00:00Z","pickupCode":"4321",
+      "deliveryAddress":{"streetName":"Rua A","streetNumber":"10","neighborhood":"Centro","city":"BH","coordinates":{"latitude":-19.9,"longitude":-43.9}}}
+  }'::jsonb);
+  select * into o from public.orders where id = oid;
+  if o.channel <> 'ifood' or o.status <> 'pending' or o.total_cents <> 5899 or o.delivery_fee_cents <> 799 or o.discount_cents <> 500
+     or o.payment_status <> 'paid' or o.external_display_id <> '7A2B' or o.customer_id is not null then raise exception 'FALHA pedido %', to_jsonb(o); end if;
+  if o.notes not like '%código 12345678%' or o.notes not like '%Código de coleta: 4321%' then raise exception 'FALHA observações %', o.notes; end if;
+  if (select options->0->>'name' from public.order_items where order_id = oid) <> 'Borda recheada' then raise exception 'FALHA adicional'; end if;
+  if public.ifood_ingest_order(c, '{"id":"ifood-order-1"}'::jsonb) <> oid then raise exception 'FALHA idempotência'; end if;
+  perform set_config('test.ic', c::text, false);
+  perform set_config('test.io', oid::text, false);
+end $$;
+reset role;
+-- loja aceita no painel → confirmação vai para a fila do iFood
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare oid uuid := current_setting('test.io')::uuid;
+begin
+  perform public.set_order_status(oid, 'preparing');
+  perform public.set_order_status(oid, 'ready');
+end $$;
+reset role;
+do $$ declare oid uuid := current_setting('test.io')::uuid;
+begin
+  if (select string_agg(action, ',' order by id) from public.integration_outbox where order_id = oid) <> 'confirm,readyForPickup' then
+    raise exception 'FALHA fila %', (select string_agg(action, ',' order by id) from public.integration_outbox where order_id = oid); end if;
+end $$;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare c uuid := current_setting('test.ic')::uuid; oid uuid := current_setting('test.io')::uuid; o2 uuid;
+begin
+  -- iFood despacha (entrega pelo iFood) e conclui; nada volta para a fila
+  perform public.ifood_apply_event(c, 'ifood-order-1', 'DSP');
+  perform public.ifood_apply_event(c, 'ifood-order-1', 'CON');
+  if (select status from public.orders where id = oid) <> 'completed' then raise exception 'FALHA concluído'; end if;
+  if (select count(*) from public.integration_outbox where order_id = oid) <> 2 then raise exception 'FALHA eco para o iFood'; end if;
+  -- confirmado no gestor do iFood não reenvia confirmação
+  o2 := public.ifood_ingest_order(c, '{"id":"ifood-order-2","displayId":"9Z","orderType":"TAKEOUT","customer":{"name":"Ana"},
+     "items":[],"total":{"subTotal":20,"orderAmount":20},"payments":{"pending":20,"methods":[{"method":"CASH","type":"OFFLINE","cash":{"changeFor":50}}]}}'::jsonb);
+  if (select payment_method::text || '/' || change_for_cents from public.orders where id = o2) <> 'cash/5000' then raise exception 'FALHA dinheiro'; end if;
+  perform public.ifood_apply_event(c, 'ifood-order-2', 'CFM');
+  if (select status from public.orders where id = o2) <> 'preparing' or exists (select 1 from public.integration_outbox where order_id = o2) then raise exception 'FALHA CFM'; end if;
+  -- cliente pede cancelamento (disputa)
+  perform public.ifood_apply_event(c, 'ifood-order-2', 'HSD', '{"disputeId":"disp-1","action":"CANCELLATION","message":"Demorou"}');
+  if not (select marketplace_cancel_requested from public.orders where id = o2) or (select external_flags->>'dispute_id' from public.orders where id = o2) <> 'disp-1' then raise exception 'FALHA disputa'; end if;
+  perform set_config('test.io2', o2::text, false);
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ begin perform public.respond_marketplace_cancellation(current_setting('test.io2')::uuid, true); end $$;
+reset role;
+do $$ declare o2 uuid := current_setting('test.io2')::uuid;
+begin
+  if (select status from public.orders where id = o2) <> 'cancelled' then raise exception 'FALHA aceitar cancelamento'; end if;
+  if (select string_agg(action, ',') from public.integration_outbox where order_id = o2) <> 'acceptCancellation' then raise exception 'FALHA fila disputa'; end if;
+end $$;
+-- funcionário/anon não acessam
+set request.jwt.claims = '{"role":"anon"}';
+do $$ begin
+  begin perform public.ifood_connections(); raise exception 'FALHA anon conexões'; exception when insufficient_privilege then null; end;
+  begin perform public.ifood_ingest_order(current_setting('test.ic')::uuid, '{}'); raise exception 'FALHA anon pedido'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare r jsonb;
+begin
+  r := public.ifood_overview(current_setting('test.iu')::uuid);
+  if (r->'connection'->>'active')::boolean is not true or (r->'connection'->>'authorized')::boolean is not true then raise exception 'FALHA visão %', r; end if;
+  if r::text like '%"ref"%' or r::text like '%tok%' then raise exception 'FALHA vazou token'; end if;
+  perform public.ifood_disconnect(current_setting('test.iu')::uuid);
+  if (public.ifood_overview(current_setting('test.iu')::uuid)->'connection'->>'active')::boolean then raise exception 'FALHA desconectar'; end if;
+end $$;
+reset role;
+select 'IFOOD OK' as resultado;

@@ -167,7 +167,8 @@ async function poll(c: Conn) {
 // ---------------- Fila de saída (status -> marketplace) ----------------
 async function processOutbox() {
   const { data: jobs } = await admin.from("integration_outbox")
-    .select("*, orders(external_id), marketplace_connections(*)")
+    .select("*, orders(external_id), marketplace_connections!inner(*)")
+    .neq("marketplace_connections.provider", "ifood")   // iFood tem worker próprio
     .is("done_at", null).lte("next_attempt_at", new Date().toISOString()).lt("attempts", 12)
     .order("id").limit(50);
   let ok = 0;
@@ -322,7 +323,7 @@ Deno.serve(async (req) => {
       const out: Record<string, number> = {};
       if (job === "outbox" || job === "all") out.sent = await processOutbox();
       if (job === "poll" || job === "all") {
-        const { data: conns } = await admin.from("marketplace_connections").select("*").eq("active", true).eq("polling_enabled", true);
+        const { data: conns } = await admin.from("marketplace_connections").select("*").eq("active", true).eq("polling_enabled", true).neq("provider", "ifood");
         let n = 0;
         for (const c of (conns ?? []) as Conn[]) { try { n += await poll(c); } catch (e) { await setError(c, e instanceof Error ? e.message : String(e)); } }
         out.received = n;
