@@ -1262,3 +1262,62 @@ begin
 end $$;
 reset role;
 select 'IFOOD OK' as resultado;
+
+-- ===== Domínio próprio =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; r jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  r := public.domain_overview(u);
+  if (r->>'ready')::boolean or r->'domain' <> 'null'::jsonb then raise exception 'FALHA estado inicial %', r; end if;
+  if public.domain_can_manage(u) is not true then raise exception 'FALHA gestor'; end if;
+  begin perform public.admin_domains_save('prj_abcdefghij12', null, 'token-qualquer-123456789012'); raise exception 'FALHA lojista salvou token';
+  exception when insufficient_privilege then null; end;
+  perform set_config('test.du', u::text, false);
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare u uuid := current_setting('test.du')::uuid;
+begin
+  -- domínios inválidos ou da plataforma são recusados
+  begin perform public.domain_upsert(u, 'loja.vercel.app', 'pending', null, null); raise exception 'FALHA domínio vercel';
+  exception when check_violation then null; end;
+  begin perform public.domain_upsert(u, 'nao tem ponto', 'pending', null, null); raise exception 'FALHA domínio inválido';
+  exception when check_violation then null; end;
+  perform public.domain_upsert(u, 'Pedidos.BellaMassa.com.br', 'pending', '[{"type":"CNAME","name":"pedidos","value":"cname.vercel-dns.com"}]', null);
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  if public.get_unit_by_domain('pedidos.bellamassa.com.br') is not null then raise exception 'FALHA pendente resolveu'; end if;
+end $$;
+reset role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ begin perform public.domain_upsert(current_setting('test.du')::uuid, 'pedidos.bellamassa.com.br', 'active', null, null); end $$;
+reset role;
+set role anon;
+do $$ begin
+  if public.get_unit_by_domain('PEDIDOS.bellamassa.com.br:443') is distinct from 'bella-massa' then raise exception 'FALHA resolver domínio'; end if;
+  if public.get_unit_by_domain('outra.com.br') is not null then raise exception 'FALHA domínio desconhecido'; end if;
+  begin perform public.domains_context(); raise exception 'FALHA anon token'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ declare u uuid := current_setting('test.du')::uuid;
+begin
+  if private.store_url_by_slug('bella-massa') <> 'https://pedidos.bellamassa.com.br' then raise exception 'FALHA url da loja'; end if;
+  if private.store_base_url(u) <> 'https://pedidos.bellamassa.com.br' then raise exception 'FALHA url base'; end if;
+  if (select dns->0->>'type' from public.unit_domains where unit_id = u) <> 'CNAME' then raise exception 'FALHA dns preservado'; end if;
+  -- loja suspensa não resolve
+  update public.tenants set status = 'suspended' where id = (select tenant_id from public.units where id = u);
+  if public.get_unit_by_domain('pedidos.bellamassa.com.br') is not null then raise exception 'FALHA suspensa resolveu'; end if;
+  update public.tenants set status = 'active' where id = (select tenant_id from public.units where id = u);
+end $$;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ begin
+  perform public.domain_delete(current_setting('test.du')::uuid);
+  if private.store_url_by_slug('bella-massa') <> 'https://domma-food.vercel.app/loja/bella-massa' then raise exception 'FALHA url padrão'; end if;
+end $$;
+reset role;
+select 'DOMINIO OK' as resultado;

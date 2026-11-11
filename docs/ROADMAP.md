@@ -4,7 +4,7 @@
 |---|---|---|
 | 0. Fundação | ✅ | Multi-tenant, autenticação e perfis, RLS, 2FA, auditoria, CI, backup |
 | 1. MVP Delivery | ✅ (Pix manual) | Cardápio + checkout, gestão do cardápio, gestor de pedidos, áreas e taxas, cupons, dashboard |
-| 1b. Pendências do MVP | 🟡 | ✅ Pagamento online via Mercado Pago (Pix com confirmação automática, cartão de crédito tokenizado, webhook assinado, estorno automático) · ✅ Impressão automática (agente no computador da loja ou estação no navegador) · ⏳ cobrança SaaS, domínio próprio por loja |
+| 1b. Pendências do MVP | ✅ | ✅ Pagamento online via Mercado Pago (Pix com confirmação automática, cartão de crédito tokenizado, webhook assinado, estorno automático) · ✅ Impressão automática (agente no computador da loja ou estação no navegador) · ✅ Cobrança da assinatura (Asaas) · ✅ Domínio próprio por loja (Vercel, HTTPS automático) |
 | 1d. Cobrança do SaaS | ✅ (aguarda conta Asaas) | Assinatura mensal no Asaas (Pix, boleto, cartão), troca de plano, cancelamento, carência e suspensão automática, webhook verificado, isenção pelo admin |
 | 1c. Marketplaces | ✅ (aguarda credenciais) | iFood (Merchant API, polling 30 s, disputas de cancelamento) e 99Food, Keeta e aiqfome via Open Delivery: webhook, polling, fila de status, cancelamento, selos |
 | 2. Salão e caixa | ✅ (parcial) | Pronto: caixa com fechamento cego, PDV, mesas e comandas (garçom usa pelo painel no celular), KDS por setor, QR Code na mesa (cliente pede, chama o garçom e pede a conta; equipe aceita os pedidos). Falta: modo offline, TEF |
