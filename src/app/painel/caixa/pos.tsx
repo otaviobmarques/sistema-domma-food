@@ -8,6 +8,7 @@ import { linesToPayload, linesTotal, ProductPicker, usePosCatalog, type PosLine 
 import { METHOD_LABEL, PAY_METHODS, type PayMethod as Method } from "./types";
 import { CreditInfo, creditAvailable, useCreditCustomer } from "@/components/pos/credit-info";
 import { printReceipt, type Receipt } from "./receipt";
+import { EmitButton } from "@/components/fiscal/emit-button";
 
 type Pay = { key: string; method: Method; value: string };
 
@@ -25,6 +26,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [done, setDone] = useState<Receipt | null>(null);
+  const [doneOrderId, setDoneOrderId] = useState<string | null>(null);
 
   const subtotal = linesTotal(lines);
   const discount = useMemo(() => {
@@ -61,7 +63,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
   }
 
   function reset() {
-    setLines([]); setPhone(""); setName(""); setNotes(""); setDisc(""); setPays([]); setErr(""); setDone(null); setType("pickup");
+    setLines([]); setPhone(""); setName(""); setNotes(""); setDisc(""); setPays([]); setErr(""); setDone(null); setDoneOrderId(null); setType("pickup");
   }
 
   const finish = useCallback(async () => {
@@ -74,6 +76,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
     });
     setBusy(false);
     if (error) { setErr(errorMessage(error)); return; }
+    setDoneOrderId(data.order_id ?? null);
     setDone({
       store: unit.name, number: data.number, lines, subtotal, discount, total: data.total_cents, change: data.change_cents,
       payments: payments.map((p) => ({ label: METHOD_LABEL[p.method], amount: p.amount_cents })),
@@ -103,6 +106,7 @@ export function Pos({ onSold }: { onSold: () => void }) {
             <p className="text-4xl font-semibold tabular-nums text-amber-900">{brl(done.change)}</p>
           </div>
         )}
+        {doneOrderId && <EmitButton orderId={doneOrderId} compact />}
         <div className="flex gap-2">
           <button className="btn-secondary flex-1" onClick={() => printReceipt(done)}>Imprimir cupom</button>
           <button className="btn-primary flex-1" onClick={reset} autoFocus>Nova venda (F10)</button>

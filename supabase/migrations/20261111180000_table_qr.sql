@@ -14,7 +14,9 @@ alter table public.tabs
 alter table public.orders add column via_qr boolean not null default false;
 create index orders_table_qr_idx on public.orders(tab_id, created_at) where via_qr;
 -- o token não é editável pela API; só por função
-revoke update (qr_token) on public.dining_tables from authenticated;
+revoke insert, update on public.dining_tables from authenticated;
+grant insert (tenant_id, unit_id, name, area, seats, position, active) on public.dining_tables to authenticated;
+grant update (name, area, seats, position, active) on public.dining_tables to authenticated;
 
 -- mesa a partir do token do QR (somente mesas ativas)
 create or replace function private.table_by_token(p_token text)

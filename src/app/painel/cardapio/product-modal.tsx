@@ -5,6 +5,7 @@ import { usePanel } from "@/lib/panel/context";
 import { Alert, Field, Modal, Toggle } from "@/components/ui";
 import { centsToInput, errorMessage, parseBRL } from "@/lib/format";
 import type { MenuData, Product } from "./types";
+import { ORIGINS } from "../fiscal/settings";
 
 const TAGS = ["novo", "vegano", "vegetariano", "picante", "sem glúten", "mais pedido"];
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -32,6 +33,8 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
   const [imageUrl, setImageUrl] = useState(product?.image_url ?? null);
   const [sku, setSku] = useState(product?.sku ?? "");
   const [fiscal, setFiscal] = useState({ ncm: product?.ncm ?? "", cfop: product?.cfop ?? "", csosn: product?.csosn ?? "", cest: product?.cest ?? "" });
+  const [origin, setOrigin] = useState(product?.fiscal_origin ?? "");
+  const [fiscalUnit, setFiscalUnit] = useState(product?.fiscal_unit ?? "UN");
   const [groupIds, setGroupIds] = useState<string[]>(
     product ? data.links.filter((l) => l.product_id === product.id).sort((a, b) => a.position - b.position).map((l) => l.group_id) : []);
   const [uploading, setUploading] = useState(false);
@@ -69,6 +72,7 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
       name: name.trim(), description: description.trim() || null, price_cents: priceCents, promo_price_cents: promoCents,
       category_id: categoryId, featured, tags, image_url: imageUrl, sku: sku.trim() || null, station: station || "cozinha",
       ncm: fiscal.ncm.trim() || null, cfop: fiscal.cfop.trim() || null, csosn: fiscal.csosn.trim() || null, cest: fiscal.cest.trim() || null,
+      fiscal_origin: origin || null, fiscal_unit: (fiscalUnit.trim() || "UN").toUpperCase().slice(0, 6),
     };
     const res = product
       ? await sb.from("products").update(row).eq("id", product.id).select("id").single()
@@ -185,7 +189,16 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
               </Field>
             ))}
           </div>
-          <p className="mt-2 text-xs text-zinc-500">Confirme estes códigos com o seu contador.</p>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="Origem">
+              <select className="input" value={origin} onChange={(e) => setOrigin(e.target.value)}>
+                <option value="">Padrão da loja</option>
+                {ORIGINS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            <Field label="Unidade"><input className="input uppercase" maxLength={6} value={fiscalUnit} onChange={(e) => setFiscalUnit(e.target.value)} placeholder="UN" /></Field>
+          </div>
+          <p className="mt-2 text-xs text-zinc-500">Campos vazios usam os padrões da loja definidos em Nota fiscal. Confirme estes códigos com o seu contador.</p>
         </details>
 
         <Alert>{err}</Alert>

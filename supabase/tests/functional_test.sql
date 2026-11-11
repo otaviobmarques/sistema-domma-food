@@ -588,3 +588,13 @@ begin
   if st <> 'rejected' then raise exception 'FALHA rejeição %', st; end if;
 end $$;
 select 'NFCE OK' as resultado;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ begin
+  begin update public.dining_tables set qr_token = 'aaaaaaaaaaaaaaaaaaaaaaaa'; raise exception 'FALHA editou token';
+  exception when insufficient_privilege then null; end;
+  update public.dining_tables set area = 'Salão' where name = '07';
+end $$;
+reset role;
+select 'TOKEN OK' as resultado;
