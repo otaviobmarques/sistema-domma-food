@@ -1464,3 +1464,98 @@ do $$ begin
 end $$;
 reset role;
 select 'RASTREAMENTO OK' as resultado;
+
+-- =====================================================================
+-- PDV PELO WHATSAPP (caixa de entrada + lançar pedido)
+-- =====================================================================
+do $$ declare t uuid := (select tenant_id from public.units where id = current_setting('test.funit')::uuid); begin
+  perform set_config('test.wt', t::text, false);
+  insert into public.marketing_settings (tenant_id, wa_enabled, wa_phone_number_id) values (t, true, '1234567890')
+  on conflict (tenant_id) do update set wa_enabled = true, wa_phone_number_id = '1234567890';
+end $$;
+-- cliente escreve (webhook, service_role)
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare c uuid; c2 uuid; t uuid := current_setting('test.wt')::uuid; begin
+  c := public.inbox_inbound(t, '5531977665544', 'Carla', 'wamid.A1', 'text', 'Oi, quero uma pizza', now());
+  c2 := public.inbox_inbound(t, '5531977665544', 'Carla', 'wamid.A1', 'text', 'Oi, quero uma pizza', now());  -- repetido
+  if c is null or c <> c2 then raise exception 'FALHA conversa'; end if;
+  perform public.inbox_inbound(t, '5531977665544', null, 'wamid.A2', 'audio', null, now());
+  if (select count(*) from public.wa_messages where conversation_id = c) <> 2 then raise exception 'FALHA duplicou'; end if;
+  if (select unread from public.wa_conversations where id = c) <> 2 or (select last_preview from public.wa_conversations where id = c) <> '🎤 Áudio' then raise exception 'FALHA não lidas'; end if;
+  perform set_config('test.wc', c::text, false);
+  -- conversa velha (janela fechada)
+  perform set_config('test.wc_old', public.inbox_inbound(t, '5531911112222', 'Velho', 'wamid.OLD', 'text', 'oi', now() - interval '2 days')::text, false);
+end $$;
+reset role;
+set request.jwt.claims = '{}';
+set role anon;
+do $$ begin
+  begin perform public.inbox_inbound(current_setting('test.wt')::uuid, '5531900000000', 'x', 'w', 'text', 'x', null); raise exception 'FALHA anon inbound'; exception when insufficient_privilege then null; end;
+  begin perform public.inbox_open(current_setting('test.wc')::uuid); raise exception 'FALHA anon abriu'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+-- cozinha não vê o atendimento
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  if exists (select 1 from public.wa_messages) then raise exception 'FALHA cozinha leu mensagens'; end if;
+  begin perform public.inbox_open(current_setting('test.wc')::uuid); raise exception 'FALHA cozinha abriu'; exception when insufficient_privilege then null; end;
+  begin perform public.inbox_queue_reply(current_setting('test.wc')::uuid, 'oi'); raise exception 'FALHA cozinha respondeu'; exception when insufficient_privilege then null; end;
+end $$;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare o jsonb; m bigint; r jsonb; pid uuid := current_setting('test.pid')::uuid; ord public.orders; begin
+  o := public.inbox_overview(current_setting('test.wt')::uuid);
+  if not (o->>'wa_enabled')::boolean or (o->>'unread')::int < 2 then raise exception 'FALHA overview %', o; end if;
+  o := public.inbox_open(current_setting('test.wc')::uuid);
+  if jsonb_array_length(o->'messages') <> 2 or not (o->'conversation'->>'window_open')::boolean then raise exception 'FALHA abrir %', o; end if;
+  if (select unread from public.wa_conversations where id = current_setting('test.wc')::uuid) <> 0 then raise exception 'FALHA marcar lida'; end if;
+  m := public.inbox_queue_reply(current_setting('test.wc')::uuid, '  Claro! Qual sabor?  ');
+  if (select body from public.wa_messages where id = m) <> 'Claro! Qual sabor?' then raise exception 'FALHA resposta'; end if;
+  perform set_config('test.wm', m::text, false);
+  begin perform public.inbox_queue_reply(current_setting('test.wc_old')::uuid, 'oi'); raise exception 'FALHA janela'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.inbox_queue_reply(current_setting('test.wc')::uuid, '   '); raise exception 'FALHA vazia'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- lança o pedido (retirada, dinheiro): entra aceito no canal WhatsApp
+  r := public.wa_order(jsonb_build_object('unit_id', current_setting('test.funit'), 'conversation_id', current_setting('test.wc'),
+    'type', 'pickup', 'payment_method', 'cash', 'customer', jsonb_build_object('name', 'Carla Souza', 'phone', '31977665544'),
+    'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 2, 'unit_price_cents', 1))));
+  select * into ord from public.orders where id = (r->>'order_id')::uuid;
+  if ord.channel <> 'whatsapp' or ord.status <> 'preparing' or ord.accepted_at is null or ord.total_cents <> 5980 then raise exception 'FALHA pedido %', to_jsonb(ord); end if;
+  if (select note from public.order_events where order_id = ord.id and from_status is null) not like '%atendimento%' then raise exception 'FALHA evento'; end if;
+  if (select customer_id from public.wa_conversations where id = current_setting('test.wc')::uuid) <> ord.customer_id then raise exception 'FALHA ligar cliente'; end if;
+  if (public.inbox_open(current_setting('test.wc')::uuid)->'customer'->>'orders_count') is null then raise exception 'FALHA cliente na conversa'; end if;
+  -- Pix fica aguardando pagamento; cartão online não é aceito pelo atendimento
+  r := public.wa_order(jsonb_build_object('unit_id', current_setting('test.funit'), 'type', 'pickup', 'payment_method', 'pix',
+    'customer', jsonb_build_object('name', 'Carla Souza', 'phone', '31977665544'), 'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1))));
+  if r->>'status' <> 'awaiting_payment' then raise exception 'FALHA pix %', r; end if;
+  begin perform public.wa_order(jsonb_build_object('unit_id', current_setting('test.funit'), 'type', 'pickup', 'payment_method', 'online_card',
+    'customer', jsonb_build_object('name', 'C', 'phone', '31977665544'), 'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1))));
+    raise exception 'FALHA cartão online'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.inbox_set_status(current_setting('test.wc')::uuid, 'closed');
+end $$;
+-- cozinha não lança pedido
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.wa_order(jsonb_build_object('unit_id', current_setting('test.funit'), 'type', 'pickup', 'payment_method', 'cash',
+    'customer', jsonb_build_object('name', 'C', 'phone', '31977665500'), 'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1))));
+    raise exception 'FALHA cozinha lançou'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+-- envio (service_role): pega uma vez, registra resultado e status da Meta
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; m bigint := current_setting('test.wm')::bigint; begin
+  j := public.inbox_send_job(m);
+  if j->>'to' <> '5531977665544' or j->>'text' <> 'Claro! Qual sabor?' then raise exception 'FALHA job %', j; end if;
+  if public.inbox_send_job(m) is not null then raise exception 'FALHA job duas vezes'; end if;
+  perform public.inbox_send_result(m, true, 'wamid.OUT1', null);
+  perform public.inbox_status(current_setting('test.wt')::uuid, 'wamid.OUT1', 'read', null);
+  perform public.inbox_status(current_setting('test.wt')::uuid, 'wamid.OUT1', 'delivered', null);   -- fora de ordem: não volta
+  if (select status from public.wa_messages where id = m) <> 'read' then raise exception 'FALHA status'; end if;
+  -- cliente volta a escrever: conversa fechada reabre
+  perform public.inbox_inbound(current_setting('test.wt')::uuid, '5531977665544', 'Carla', 'wamid.A3', 'text', 'Obrigada!', now());
+  if (select status from public.wa_conversations where id = current_setting('test.wc')::uuid) <> 'open' then raise exception 'FALHA reabrir'; end if;
+end $$;
+reset role;
+select 'PDV WHATSAPP OK' as resultado;
