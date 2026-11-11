@@ -32,6 +32,7 @@ const ICONS: Record<string, React.ReactNode> = {
   card: <><rect x="2.5" y="5" width="19" height="14" rx="2" /><path d="M2.5 10h19M6 15h4" /></>,
   receipt: <><path d="M6 3h12v18l-2.5-1.5L13 21l-2.5-1.5L8 21l-2-1.5V3Z" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
   rider: <><circle cx="5.5" cy="17.5" r="2.5" /><circle cx="18.5" cy="17.5" r="2.5" /><path d="M8 17.5h7l2-6h-4l-2 3H7M13 5h3l2.5 6.5M9 8h4" /></>,
+  badge: <><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" /><path d="M9 11.5h6M12 8.5v6" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
 
@@ -43,7 +44,7 @@ function Svg({ name, className = "h-[18px] w-[18px]" }: { name: string; classNam
   );
 }
 
-const NAV: { href: string; label: string; icon: string; manage?: boolean; cashier?: boolean; staff?: boolean; section?: string }[] = [
+const NAV: { href: string; label: string; icon: string; manage?: boolean; cashier?: boolean; staff?: boolean; owner?: boolean; section?: string }[] = [
   { href: "/painel", label: "Dashboard", icon: "dashboard", manage: true, section: "Operação" },
   { href: "/painel/pedidos", label: "Pedidos", icon: "orders" },
   { href: "/painel/caixa", label: "Caixa / PDV", icon: "cash" },
@@ -67,6 +68,7 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; cashie
   { href: "/painel/pagamentos", label: "Pagamento online", icon: "card", manage: true },
   { href: "/painel/fiscal", label: "Nota fiscal", icon: "receipt", manage: true },
   { href: "/painel/configuracoes", label: "Configurações", icon: "settings", manage: true },
+  { href: "/painel/assinatura", label: "Assinatura", icon: "badge", owner: true },
   { href: "/painel/seguranca", label: "Segurança", icon: "shield" },
 ];
 
@@ -75,7 +77,7 @@ export function Sidebar() {
   const path = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const items = NAV.filter((n) => n.staff ? canManage(role) || role === "cashier" || role === "attendant"
+  const items = NAV.filter((n) => n.owner ? role === "owner" : n.staff ? canManage(role) || role === "cashier" || role === "attendant"
     : n.cashier ? canManage(role) || role === "cashier" : !n.manage || canManage(role));
 
   function switchUnit(id: string) {
