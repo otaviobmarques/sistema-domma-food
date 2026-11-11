@@ -37,7 +37,7 @@ async function rpc(fn, body) {
 // ---- ESC/POS ----
 const ESC = 0x1b, GS = 0x1d;
 // impressoras térmicas comuns usam a página de código 860 (português) ou 850; trocamos acentos por equivalentes seguros
-const strip = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7e\n]/g, "?");
+const strip = (s) => s.replace(/[·•]/g, "-").replace(/[–—]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7e\n]/g, "?");
 function escpos(content, width) {
   const cols = width === 58 ? 32 : 42;
   const out = [Buffer.from([ESC, 0x40])];                       // inicializa
