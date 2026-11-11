@@ -37,7 +37,7 @@ function Line({ label, value, sign, strong, muted }: { label: string; value: num
   return (
     <div className={`flex justify-between py-1.5 ${strong ? "border-t border-zinc-200 pt-2.5 text-base font-semibold" : ""} ${muted ? "text-zinc-500" : ""}`}>
       <dt>{sign && <span className="mr-1.5 inline-block w-3 text-zinc-400">{sign}</span>}{label}</dt>
-      <dd className={`tabular-nums ${strong ? (value >= 0 ? "text-green-700" : "text-red-700") : ""}`}>{brl(value)}</dd>
+      <dd className={`tabular-nums ${strong ? (value >= 0 ? "text-green-700" : "text-red-700") : ""}`}>{brl(sign ? Math.abs(value) : value)}</dd>
     </div>
   );
 }
@@ -132,8 +132,8 @@ export default function Financeiro() {
                 <Line label="CMV estimado" value={s.cmv_cents} muted />
                 <Line label="Margem bruta (vendas − CMV)" value={gross} />
                 <p className="mt-1 text-xs text-zinc-500">
-                  CMV vem da ficha técnica do <Link href="/painel/estoque" className="underline">Estoque</Link>.
-                  {s.sales_cents > 0 && ` Margem de ${Math.round((gross / s.sales_cents) * 100)}%.`}
+                  O CMV vem da ficha técnica do <Link href="/painel/estoque" className="underline">Estoque</Link> e só conta os produtos que têm ficha.
+                  {s.cmv_cents > 0 && s.sales_cents > 0 && ` Margem bruta de ${Math.round((gross / s.sales_cents) * 100)}%.`}
                   {" "}Vendas já incluem taxas de entrega ({brl(s.delivery_fee_cents)}) e estão líquidas de cupons ({brl(s.discount_cents)}).
                 </p>
               </dl>

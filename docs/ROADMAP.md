@@ -8,7 +8,7 @@
 | 1c. Marketplaces | ✅ (aguarda credenciais) | 99Food, Keeta e aiqfome via Open Delivery: webhook, polling, fila de status, cancelamento, selos |
 | 2. Salão e caixa | ✅ (parcial) | Pronto: caixa com fechamento cego, PDV, mesas e comandas (garçom usa pelo painel no celular), KDS por setor. Falta: QR Code na mesa para o cliente pedir sozinho, modo offline, TEF |
 | 3. WhatsApp e marketing | ⏳ | Atendente IA (Domma Chat), avisos de status, recuperação de carrinho, RFM, disparador, automações, cashback e pontos, avaliações |
-| 4. Gestão | ⏳ | Estoque e ficha técnica, financeiro (fluxo, contas, DRE), fiado e carteira, NFC-e via provedor |
+| 4. Gestão | 🟡 | ✅ Estoque com ficha técnica, custo médio e baixa automática · ✅ Financeiro (contas a pagar/receber, DRE simplificada, CMV) · ✅ Fiado com limite por cliente no PDV e nas mesas · ⏳ NFC-e via provedor |
 | 5. Escala | ⏳ | App do entregador e roteirização, totem com TEF, iFood homologado (API própria do iFood, fora do Open Delivery), redes multiunidade |
 | 6. Ecossistema | ⏳ | Domma IA + MCP, API pública e webhooks, App Store, portal de revendas |
 
