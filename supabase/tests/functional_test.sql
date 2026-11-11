@@ -543,6 +543,7 @@ begin
 end $$;
 reset role;
 -- worker (service_role)
+set request.jwt.claims = '{"role":"service_role"}';
 do $$ declare jobs jsonb; j jsonb; p jsonb; st text; d uuid;
 begin
   jobs := public.fiscal_jobs(10);
@@ -574,6 +575,7 @@ do $$ begin
   perform public.fiscal_cancel(current_setting('test.fiscal_doc')::uuid, 'Cliente desistiu da compra no balcão');
 end $$;
 reset role;
+set request.jwt.claims = '{"role":"service_role"}';
 do $$ declare jobs jsonb; st text; d uuid := current_setting('test.fiscal_doc')::uuid;
 begin
   jobs := public.fiscal_jobs(10);
@@ -586,6 +588,11 @@ begin
   jobs := public.fiscal_jobs(10);
   st := public.fiscal_job_result(d, 201, '{"status":"erro_autorizacao","mensagem_sefaz":"Rejeição: NCM inexistente"}'::jsonb);
   if st <> 'rejected' then raise exception 'FALHA rejeição %', st; end if;
+end $$;
+set request.jwt.claims = '{"role":"anon"}';
+do $$ begin
+  begin perform public.fiscal_test_token(gen_random_uuid()); raise exception 'FALHA anon leu token'; exception when insufficient_privilege then null; end;
+  begin perform public.fiscal_jobs(1); raise exception 'FALHA anon leu fila'; exception when insufficient_privilege then null; end;
 end $$;
 select 'NFCE OK' as resultado;
 set role authenticated;

@@ -20,6 +20,7 @@ alter default privileges in schema public grant all on tables to anon, authentic
 create table auth.mfa_factors (id uuid primary key default gen_random_uuid(), user_id uuid, status text);
 create function auth.jwt() returns jsonb language sql stable as $$
   select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
+create function auth.role() returns text language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), current_setting('request.jwt.claims', true)::jsonb->>'role') $$;
 -- Vault e pg_net simulados
 create schema vault;
 create table vault.secrets (id uuid primary key default gen_random_uuid(), name text, secret text, description text);
