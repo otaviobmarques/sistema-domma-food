@@ -42,6 +42,8 @@ export const PAYMENT_LABEL: Record<string, string> = {
   card_on_delivery: "Cartão na entrega",
   voucher: "Vale-refeição",
   online_card: "Cartão online",
+  credit_card: "Crédito",
+  debit_card: "Débito",
 };
 
 export const TYPE_LABEL: Record<string, string> = {
@@ -57,3 +59,8 @@ export function errorMessage(e: unknown): string {
   if (e && typeof e === "object" && "message" in e) return String((e as { message: string }).message);
   return "Algo deu errado. Tente novamente.";
 }
+
+export const ROLE_LABEL: Record<string, string> = {
+  owner: "Dono", manager: "Gerente", cashier: "Caixa", attendant: "Atendente",
+  kitchen: "Cozinha", waiter: "Garçom", courier: "Entregador",
+};

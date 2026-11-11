@@ -221,3 +221,80 @@ do $$ begin
 end $$;
 reset role;
 select 'ADMIN OK' as resultado;
+-- Equipe: convite para quem já tem conta e para quem ainda não tem
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; begin
+  if public.invite_member(t, 'dono@b.com', 'cashier') <> 'added' then raise exception 'FALHA add'; end if;
+  if public.invite_member(t, 'Novo@Equipe.com', 'kitchen') <> 'invited' then raise exception 'FALHA invite'; end if;
+  if jsonb_array_length(public.list_members(t)) <> 2 then raise exception 'FALHA list'; end if;
+  begin perform public.invite_member(t, 'x@y.com', 'owner'); raise exception 'FALHA owner';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+insert into auth.users (id, email) values ('44444444-4444-4444-4444-444444444444','novo@equipe.com');
+set role authenticated;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+set request.jwt.claims = '{"aal":"aal1"}';
+do $$ begin
+  if public.accept_invitations() <> 1 then raise exception 'FALHA accept'; end if;
+  if (select role from public.memberships where user_id = auth.uid()) <> 'kitchen' then raise exception 'FALHA role'; end if;
+  begin perform public.invite_member(current_setting('test.a_tenant')::uuid, 'z@z.com', 'waiter'); raise exception 'FALHA cozinha convidou';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'EQUIPE OK' as resultado;
+-- ===== Fase 2: caixa, PDV, mesas, KDS =====
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+set request.jwt.claims = '{"aal":"aal2"}';
+do $$ declare u uuid; pid uuid; r jsonb; tb uuid; tab uuid; it record; st jsonb;
+begin
+  select id into u from public.units where slug = 'bella-massa';
+  select id into pid from public.products where tenant_id = current_setting('test.a_tenant')::uuid limit 1;  -- 29,90
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'items', jsonb_build_array(jsonb_build_object('product_id', pid)),
+      'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',5000)))); raise exception 'FALHA vendeu sem caixa';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.cash_open(u, 10000);
+  -- venda: 2x 29,90 = 59,80; desconto 4,80 => 55,00; paga 20 pix + 50 dinheiro => troco 15
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'discount_cents', 480,
+      'items', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 2)),
+      'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',2000), jsonb_build_object('method','cash','amount_cents',5000))));
+  if (r->>'total_cents')::int <> 5500 or (r->>'change_cents')::int <> 1500 then raise exception 'FALHA pdv %', r; end if;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'items', jsonb_build_array(jsonb_build_object('product_id', pid)),
+      'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',1000)))); raise exception 'FALHA pagou a menos';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.cash_move(u, 'withdrawal', 3000, 'Sangria teste');
+  -- mesa
+  insert into public.dining_tables (tenant_id, unit_id, name) values (current_setting('test.a_tenant')::uuid, u, '07') returning id into tb;
+  tab := public.tab_open(u, tb, '', 2, 'João');
+  perform public.tab_add_items(tab, jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1)));
+  perform public.tab_add_items(tab, jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1)));
+  -- KDS: conclui os itens do primeiro pedido da mesa => pedido fica pronto
+  for it in select i.id from public.order_items i join public.orders o on o.id = i.order_id where o.tab_id = tab order by o.number limit 1 loop
+    perform public.kds_set_item(it.id, 'preparing'); perform public.kds_set_item(it.id, 'done');
+  end loop;
+  if (select count(*) from public.orders where tab_id = tab and status = 'ready') <> 1 then raise exception 'FALHA kds'; end if;
+  begin perform public.cash_close(u, '{"cash":0}'::jsonb, ''); raise exception 'FALHA fechou com mesa aberta';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- fecha a conta: 59,80 + 10% (5,98) = 65,78 no crédito
+  r := public.tab_close(tab, jsonb_build_array(jsonb_build_object('method','credit_card','amount_cents',6578)), true, 0);
+  if (r->>'total_cents')::int <> 6578 then raise exception 'FALHA tab %', r; end if;
+  if exists (select 1 from public.orders where tab_id = tab and (status <> 'completed' or payment_status <> 'paid')) then raise exception 'FALHA pedidos da mesa'; end if;
+  st := public.cash_status(u)->'expected';
+  -- dinheiro: 100 fundo + 35 (50 - 15 troco) - 30 sangria = 105; pix 20; crédito 65,78
+  if (st->>'cash')::int <> 10500 or (st->>'pix')::int <> 2000 or (st->>'credit_card')::int <> 6578 then raise exception 'FALHA caixa %', st; end if;
+  r := public.cash_close(u, '{"cash":10000,"pix":2000,"credit_card":6578}'::jsonb, 'faltou 5');
+  if (r->>'difference_cents')::int <> -500 then raise exception 'FALHA diferença %', r; end if;
+end $$;
+-- cozinha não abre caixa nem vende; garçom (não há) — cozinha pode marcar item
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+set request.jwt.claims = '{"aal":"aal1"}';
+do $$ begin
+  begin perform public.cash_open((select id from public.units where slug='bella-massa'), 0); raise exception 'FALHA cozinha abriu caixa';
+  exception when insufficient_privilege then null; end;
+  perform public.kds_set_item((select id from public.order_items limit 1), 'done');
+end $$;
+reset role;
+select 'FASE2 OK' as resultado;
