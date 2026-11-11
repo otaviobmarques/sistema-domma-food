@@ -8,7 +8,7 @@ import { brl, errorMessage, formatPhone, parseBRL } from "@/lib/format";
 type Customer = {
   id: string; name: string; phone: string; email: string | null; opt_in_marketing: boolean;
   orders_count: number; total_spent_cents: number; first_order_at: string | null; last_order_at: string | null; created_at: string;
-  cashback_cents: number; points_balance: number;
+  cashback_cents: number; points_balance: number; marketing_opt_out_at?: string | null;
 };
 type Ledger = { id: number; kind: "cashback" | "points"; amount: number; reason: string; note: string | null; expires_at: string | null; created_at: string };
 type Reward = { id: string; name: string; description: string | null; points_cost: number };
@@ -232,9 +232,18 @@ export default function Clientes() {
                     <td className="p-3 tabular-nums">{c.cashback_cents ? brl(c.cashback_cents) : "—"}</td>
                     <td className="p-3 tabular-nums">{c.points_balance || "—"}</td>
                     <td className="p-3 text-xs">{c.last_order_at ? new Date(c.last_order_at).toLocaleDateString("pt-BR") : "—"}</td>
-                    <td className="p-3 text-xs">{c.opt_in_marketing ? "Aceita" : "Não"}</td>
+                    <td className="p-3 text-xs">
+                      {c.opt_in_marketing ? <span className="badge bg-green-100 text-green-800">Autorizou marketing</span>
+                        : c.marketing_opt_out_at ? <span className="badge bg-red-50 text-red-700">Descadastrado</span>
+                        : <span className="badge bg-zinc-100 text-zinc-600">Não autorizou</span>}
+                    </td>
                     <td className="whitespace-nowrap p-3 text-right">
                       <button className="btn-ghost text-xs" onClick={() => setLoyalty(c)}>Fidelidade</button>
+                      {c.opt_in_marketing && role !== "cashier" && <button className="btn-ghost text-xs" onClick={async () => {
+                        if (!confirm(`Descadastrar ${c.name} do marketing? Ele não receberá mais campanhas.`)) return;
+                        const { error } = await sb.rpc("customer_marketing_opt_out", { p_customer_id: c.id });
+                        if (error) setErr(error.message); else load();
+                      }}>Descadastrar do marketing</button>}
                       {(role === "owner" || role === "manager") && <button className="btn-ghost text-xs text-red-600" onClick={() => erase(c)}>Excluir dados</button>}
                     </td>
                   </tr>

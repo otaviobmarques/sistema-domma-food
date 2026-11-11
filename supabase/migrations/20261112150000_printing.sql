@@ -146,6 +146,10 @@ begin
   if tg_op = 'UPDATE' and new.status = 'preparing' and old.status in ('pending','awaiting_payment') then
     perform private.print_enqueue_order(new.id, 'accepted');
   end if;
+  -- Pix/cartão confirmado depois: para a loja, o pedido "chegou" agora
+  if tg_op = 'UPDATE' and old.status = 'awaiting_payment' and new.status in ('pending','preparing') then
+    perform private.print_enqueue_order(new.id, 'created');
+  end if;
   return null;
 exception when others then return null;  -- impressão nunca bloqueia o pedido
 end $$;

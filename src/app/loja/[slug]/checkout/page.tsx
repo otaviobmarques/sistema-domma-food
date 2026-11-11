@@ -42,6 +42,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   const [coupon, setCoupon] = useState("");
   const [notes, setNotes] = useState("");
   const [optIn, setOptIn] = useState(false);
+  const [birthday, setBirthday] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteErr, setQuoteErr] = useState("");
   const [quoting, setQuoting] = useState(false);
@@ -86,7 +87,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
 
   const payload = useMemo(() => ({
     slug, type, payment_method: payment,
-    customer: { name: name.trim(), phone: onlyDigits(phone), opt_in: optIn },
+    customer: { name: name.trim(), phone: onlyDigits(phone), opt_in: optIn, ...(optIn && /^\d{4}-\d{2}-\d{2}$/.test(birthday) ? { birthday } : {}) },
     address: type === "delivery" ? { ...addr, lat: geo?.lat ?? null, lng: geo?.lng ?? null } : null,
     coupon_code: coupon.trim() || null,
     change_for_cents: payment === "cash" && changeFor ? parseBRL(changeFor) : null,
@@ -96,7 +97,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     device_token: deviceToken,
     items: cart.items.map((i) => ({ product_id: i.product_id, quantity: i.quantity, notes: i.notes || null,
       options: i.options.map((o) => ({ option_id: o.option_id, quantity: o.quantity })) })),
-  }), [slug, type, payment, name, phone, optIn, addr, geo, coupon, changeFor, notes, schedule, when, cart.items, wantsCashback, deviceToken]);
+  }), [slug, type, payment, name, phone, optIn, birthday, addr, geo, coupon, changeFor, notes, schedule, when, cart.items, wantsCashback, deviceToken]);
 
   // Cotação ao vivo (servidor recalcula tudo)
   useEffect(() => {
@@ -286,6 +287,11 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
             <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
             Quero receber ofertas e novidades de {u.name} pelo WhatsApp. Posso cancelar quando quiser. Seus dados são usados apenas para o pedido e, se autorizado, para comunicações da loja (LGPD).
           </label>
+          {optIn && (
+            <Field label="Data de nascimento (opcional · ganhe um presente no aniversário)">
+              <input className="input" type="date" max={new Date().toISOString().slice(0, 10)} value={birthday} onChange={(e) => setBirthday(e.target.value)} />
+            </Field>
+          )}
         </section>
 
         <section className="card space-y-1 text-sm" aria-live="polite">
