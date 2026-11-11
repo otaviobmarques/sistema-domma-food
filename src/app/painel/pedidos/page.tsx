@@ -9,7 +9,7 @@ import {
   brl, errorMessage, formatPhone, onlyDigits, PAYMENT_LABEL, STATUS_LABEL, timeHM, TYPE_LABEL,
 } from "@/lib/format";
 import { printTicket } from "./ticket";
-import { courierOf, type Order } from "./types";
+import { courierOf, statusMessage, type Order } from "./types";
 import { ChannelBadge, channelLabel, isMarketplace } from "@/components/channel-badge";
 
 
@@ -379,6 +379,8 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
   const canCancel = o.status !== "completed" && o.status !== "cancelled";
   const phone = onlyDigits(o.customer_phone);
   const wa = `https://wa.me/${phone.length <= 11 ? "55" + phone : phone}`;
+  const waStatus = `${wa}?text=${encodeURIComponent(statusMessage(o, unitName))}`;
+  const marketplace = ["ifood", "keeta", "99food", "aiqfome", "marketplace"].includes(o.channel);
   const a = o.address;
 
   async function doCancel() {
@@ -395,6 +397,8 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
             <p className="font-semibold">{o.customer_name}</p>
             <p className="text-zinc-600">
               {formatPhone(o.customer_phone)} · <a className="text-green-700 hover:underline" href={wa} target="_blank" rel="noopener noreferrer">WhatsApp ↗</a>
+              {!marketplace && phone.length >= 10 && <> · <a className="text-green-700 hover:underline" href={waStatus} target="_blank" rel="noopener noreferrer"
+                title="Abre o WhatsApp com a mensagem do status atual">Avisar status ↗</a></>}
             </p>
           </div>
           <p className="flex flex-wrap items-center gap-2"><span className="text-zinc-500">Origem:</span> <ChannelBadge channel={o.channel} size="md" />

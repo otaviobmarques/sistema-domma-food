@@ -7,10 +7,11 @@ import { errorMessage } from "@/lib/format";
 import { Campaigns } from "./campaigns";
 import { Automations } from "./automations";
 import { WhatsAppSettings } from "./settings";
+import { StatusNotices } from "./status";
 import type { Settings } from "./shared";
 
-type Tab = "campaigns" | "automations" | "whatsapp";
-const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["whatsapp", "WhatsApp"]];
+type Tab = "campaigns" | "automations" | "status" | "whatsapp";
+const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["status", "Avisos de pedido"], ["whatsapp", "WhatsApp"]];
 
 export default function Marketing() {
   const { tenantId, role } = usePanel();
@@ -38,15 +39,16 @@ export default function Marketing() {
           O envio manual pelo WhatsApp da loja funciona hoje; o envio automático usa a API oficial do WhatsApp, que depende da aprovação da Meta.
         </p>
       </div>
-      <div className="flex gap-1 border-b border-zinc-200" role="tablist">
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200" role="tablist">
         {TABS.map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? "border-brand-600 text-brand-700" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</button>
+            className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? "border-brand-600 text-brand-700" : "border-transparent text-zinc-500 hover:text-zinc-800"}`}>{l}</button>
         ))}
       </div>
       <Alert>{err}</Alert>
       {loaded && tab === "campaigns" && <Campaigns apiReady={apiReady} />}
       {loaded && tab === "automations" && <Automations apiReady={apiReady} freqDays={s?.frequency_days ?? 7} />}
+      {loaded && tab === "status" && <StatusNotices />}
       {loaded && tab === "whatsapp" && <WhatsAppSettings settings={s} onChanged={load} />}
     </div>
   );

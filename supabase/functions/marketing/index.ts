@@ -1,5 +1,5 @@
 // Domma Food · Marketing via WhatsApp Cloud API (Meta)
-//   POST /marketing/worker            → envia a fila de mensagens (x-worker-secret)
+//   POST /marketing/worker            → envia avisos de pedido e a fila das campanhas (x-worker-secret)
 //   GET  /marketing/webhook?tenant=   → verificação do webhook (hub.challenge)
 //   POST /marketing/webhook?tenant=   → status (enviado/entregue/lido/falhou) e respostas (SAIR); assinatura X-Hub-Signature-256
 //   POST /marketing/test {tenant_id}  → testa número e token (JWT do dono da conta)
@@ -48,23 +48,37 @@ const errMsg = (d: Record<string, unknown>) => {
 
 type Job = { id: number; to: string; params: string[]; template: string; lang: string; phone_number_id: string; version: string; token: string };
 
+async function sendTemplate(j: Job) {
+  const body = {
+    messaging_product: "whatsapp", to: j.to, type: "template",
+    template: { name: j.template, language: { code: j.lang },
+      ...(j.params?.length ? { components: [{ type: "body", parameters: j.params.map((t) => ({ type: "text", text: String(t).slice(0, 1000) || "-" })) }] } : {}) },
+  };
+  const r = await graph(j.version, j.token, "POST", `${j.phone_number_id}/messages`, body);
+  const waId = (r.data.messages as { id: string }[] | undefined)?.[0]?.id ?? null;
+  const ok = r.http === 200 && !!waId;
+  return { ok, waId, error: ok ? null : errMsg(r.data) };
+}
+
 async function worker(req: Request) {
   const { data: secret } = await admin.rpc("marketing_worker_secret");
   if (!secret || !safeEqual(req.headers.get("x-worker-secret") ?? "", String(secret))) return json({ error: "Não autorizado" }, 401);
+  let sent = 0, failed = 0;
+  // 1) avisos de status do pedido: urgentes, sem janela de horário
+  const { data: sjobs, error: serr } = await admin.rpc("status_jobs", { p_limit: 50 });
+  if (serr) console.error(serr);
+  for (const j of (sjobs ?? []) as Job[]) {
+    const r = await sendTemplate(j);
+    await admin.rpc("status_job_result", { p_id: j.id, p_ok: r.ok, p_wa_id: r.waId, p_error: r.error });
+    if (r.ok) sent++; else failed++;
+  }
+  // 2) campanhas (respeitam a janela de envio da loja)
   const { data: jobs, error } = await admin.rpc("marketing_jobs", { p_limit: 50 });
   if (error) return json({ error: error.message }, 500);
-  let sent = 0, failed = 0;
   for (const j of (jobs ?? []) as Job[]) {
-    const body = {
-      messaging_product: "whatsapp", to: j.to, type: "template",
-      template: { name: j.template, language: { code: j.lang },
-        ...(j.params?.length ? { components: [{ type: "body", parameters: j.params.map((t) => ({ type: "text", text: String(t).slice(0, 1000) || "-" })) }] } : {}) },
-    };
-    const r = await graph(j.version, j.token, "POST", `${j.phone_number_id}/messages`, body);
-    const waId = (r.data.messages as { id: string }[] | undefined)?.[0]?.id ?? null;
-    const ok = r.http === 200 && !!waId;
-    await admin.rpc("marketing_job_result", { p_id: j.id, p_ok: ok, p_wa_id: waId, p_error: ok ? null : errMsg(r.data) });
-    if (ok) sent++; else failed++;
+    const r = await sendTemplate(j);
+    await admin.rpc("marketing_job_result", { p_id: j.id, p_ok: r.ok, p_wa_id: r.waId, p_error: r.error });
+    if (r.ok) sent++; else failed++;
     await new Promise((res) => setTimeout(res, 120));   // ritmo moderado para não estourar limites da Meta
   }
   return json({ sent, failed });
