@@ -290,3 +290,23 @@ Configuração em **Painel › Integrações › Gestão** (dono e gerência, po
   - O que o próprio PDV fez não volta como evento.
 - **Canais:** escolha quais vão para o PDV. Por padrão vão cardápio, WhatsApp, totem, mesa, telefone e balcão; marketplaces ficam de fora para não duplicar pedido.
 - **De-para dos itens:** o campo **Código no PDV** do produto (e do adicional) vai como `externalCode`. Sem ele, vai o id do Domma.
+
+## Redes e multiunidade
+
+- **Rede de lojas (Painel › Rede de lojas)**, para dono e gerência:
+  - Visão consolidada: faturamento, pedidos, ticket e cancelados da rede (hoje, 7 ou 30 dias).
+  - Tabela com as lojas lado a lado: faturamento e participação, pedidos, ticket, cancelados, tempo de preparo e pedidos em aberto.
+  - Canais e produtos mais vendidos na rede.
+  - O gerente restrito a algumas lojas vê só as dele (`network_overview`).
+- **Nova loja** (só o dono, `unit_create`):
+  - Copia de outra loja os horários, as formas de pagamento, os tempos, a cor, o logo e a taxa de serviço. Também pode copiar as áreas de entrega e os preços por loja.
+  - Depois de criar, o painel já abre a loja nova em Configurações para completar endereço, Pix e telefone.
+  - O dono também desativa e reativa lojas (`unit_set_active`). A conta precisa ter sempre pelo menos uma loja ativa.
+- **Limite do plano** (`plans.max_units`): Essencial, Delivery e Salão têm 1 loja; Completo tem 3; contas isentas não têm limite.
+  - O limite vale no banco, inclusive para inserts diretos e para reativar uma loja.
+  - Antes, o dono podia criar lojas direto pela tabela sem limite.
+- **Cardápio único da rede:**
+  - Produto, categoria e complementos são da conta.
+  - No produto, a seção **Preço e disponibilidade por loja** troca o preço ou tira o item de uma loja (`product_unit_overrides`). Preço vazio usa o padrão da rede.
+  - Só quem tem acesso à loja altera o preço dela.
+- O seletor de loja no topo do menu troca a loja do painel, e a equipe pode ser restrita a lojas específicas (Equipe).

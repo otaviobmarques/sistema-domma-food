@@ -34,6 +34,7 @@ const ICONS: Record<string, React.ReactNode> = {
   rider: <><circle cx="5.5" cy="17.5" r="2.5" /><circle cx="18.5" cy="17.5" r="2.5" /><path d="M8 17.5h7l2-6h-4l-2 3H7M13 5h3l2.5 6.5M9 8h4" /></>,
   badge: <><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" /><path d="M9 11.5h6M12 8.5v6" /></>,
   chat: <><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4v-4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" /><path d="M8 10h8M8 13h5" /></>,
+  network: <><circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="18" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M12 7.5v4M12 11.5l-5.5 4.5M12 11.5l5.5 4.5" /></>,
   totem: <><rect x="6" y="2.5" width="12" height="15" rx="2" /><path d="M9 21.5h6M12 17.5v4M9 7h6M9 10.5h4" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
@@ -58,7 +59,8 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; cashie
   { href: "/painel/cardapio", label: "Cardápio", icon: "menu", manage: true },
   { href: "/painel/entregas", label: "Áreas de entrega", icon: "delivery", manage: true },
   { href: "/painel/entregadores", label: "Entregadores", icon: "rider", staff: true },
-  { href: "/painel/estoque", label: "Estoque", icon: "box", manage: true, section: "Gestão" },
+  { href: "/painel/rede", label: "Rede de lojas", icon: "network", manage: true, section: "Gestão" },
+  { href: "/painel/estoque", label: "Estoque", icon: "box", manage: true },
   { href: "/painel/financeiro", label: "Financeiro", icon: "wallet", manage: true },
   { href: "/painel/fiado", label: "Fiado", icon: "ledger", cashier: true },
   { href: "/painel/cupons", label: "Cupons", icon: "coupons", manage: true, section: "Vendas" },

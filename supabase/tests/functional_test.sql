@@ -1824,3 +1824,70 @@ do $$ begin
 end $$;
 reset role;
 select 'ERP OK' as resultado;
+
+-- =====================================================================
+-- REDES E MULTIUNIDADE
+-- =====================================================================
+do $$ declare t uuid := current_setting('test.wt')::uuid; begin
+  update public.tenants set billing_exempt = false, plan_id = 'completo' where id = t;
+  perform set_config('test.nu_before', (select count(*) from public.units where tenant_id = t and active)::text, false);
+end $$;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.wt')::uuid; src uuid := current_setting('test.funit')::uuid; r jsonb; n int; nv uuid; ov jsonb; begin
+  n := current_setting('test.nu_before')::int;
+  begin perform public.unit_create(t, 'Filial', 'Endereço Inválido'); raise exception 'FALHA slug'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.unit_create(t, 'Filial', (select slug from public.units where id = src)); raise exception 'FALHA slug repetido'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- abre filiais até o limite do plano (3 no Completo)
+  for i in n + 1 .. 3 loop
+    r := public.unit_create(t, 'Filial ' || i, 'filial-teste-' || i, src, true, true);
+    nv := (r->>'unit_id')::uuid;
+  end loop;
+  perform set_config('test.nu_new', nv::text, false);
+  if (select count(*) from public.delivery_zones where unit_id = nv) <> (select count(*) from public.delivery_zones where unit_id = src) then raise exception 'FALHA copiar áreas'; end if;
+  if (select prep_time_min from public.units where id = nv) <> (select prep_time_min from public.units where id = src) then raise exception 'FALHA copiar config'; end if;
+  begin perform public.unit_create(t, 'Uma a mais', 'filial-teste-extra'); raise exception 'FALHA limite'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- insert direto também respeita o limite
+  begin insert into public.units (tenant_id, name, slug) values (t, 'Direto', 'filial-direto'); raise exception 'FALHA limite direto'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- desativa uma, abre outra; reativar passaria do limite
+  perform public.unit_set_active(nv, false);
+  perform public.unit_create(t, 'Outra', 'filial-teste-outra');
+  begin perform public.unit_set_active(nv, true); raise exception 'FALHA reativar'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- visão da rede
+  ov := public.network_overview(t, now() - interval '30 days', now() + interval '1 minute');
+  if (ov->>'limit')::int <> 3 or jsonb_array_length(ov->'units') < 3 or (ov->'totals'->>'orders') is null then raise exception 'FALHA rede %', ov; end if;
+  if not exists (select 1 from jsonb_array_elements(ov->'units') x where x->>'id' = src::text and (x->>'orders')::int > 0) then raise exception 'FALHA vendas por loja'; end if;
+  -- preço por loja
+  insert into public.product_unit_overrides (product_id, unit_id, tenant_id, price_cents, available)
+  values (current_setting('test.pid')::uuid, (select id from public.units where slug = 'filial-teste-outra'), t, 1234, true);
+end $$;
+-- gerente restrito a uma loja não mexe no preço de outra nem abre loja
+do $$ declare t uuid := current_setting('test.wt')::uuid; begin
+  perform set_config('test.mgr_check', '1', false);
+end $$;
+reset role;
+do $$ declare t uuid := current_setting('test.wt')::uuid; m uuid := '55555555-5555-5555-5555-555555555555'; begin
+  insert into auth.users (id, email) values (m, 'gerente-rede@teste.local') on conflict do nothing;
+  insert into public.memberships (tenant_id, user_id, role, unit_ids) values (t, m, 'manager', array[current_setting('test.funit')::uuid]) on conflict do nothing;
+end $$;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
+do $$ declare t uuid := current_setting('test.wt')::uuid; ov jsonb; n int; begin
+  begin perform public.unit_create(t, 'Gerente', 'filial-gerente'); raise exception 'FALHA gerente abriu loja'; exception when insufficient_privilege then null; end;
+  update public.product_unit_overrides set price_cents = 1 where unit_id = (select id from public.units where slug = 'filial-teste-outra');
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'FALHA gerente alterou preço de outra loja'; end if;
+  begin insert into public.product_unit_overrides (product_id, unit_id, tenant_id, price_cents) values
+    (current_setting('test.pid')::uuid, (select id from public.units where slug = 'filial-teste-2' union all select current_setting('test.nu_new')::uuid limit 1), t, 1);
+    raise exception 'FALHA gerente inseriu em outra loja'; exception when insufficient_privilege then null; when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  ov := public.network_overview(t, now() - interval '30 days', now() + interval '1 minute');
+  if jsonb_array_length(ov->'units') <> 1 then raise exception 'FALHA gerente vê só a sua loja %', jsonb_array_length(ov->'units'); end if;
+end $$;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.network_overview(current_setting('test.wt')::uuid, now() - interval '1 day', now()); raise exception 'FALHA cozinha rede'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'MULTIUNIDADE OK' as resultado;
