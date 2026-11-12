@@ -7,6 +7,7 @@ import { ChannelBadge } from "@/components/channel-badge";
 import { errorMessage } from "@/lib/format";
 import { IfoodCard } from "./ifood";
 import { LogisticsCard } from "./logistics";
+import { ErpCard } from "./erp";
 
 type Conn = {
   id: string; provider: string; display_name: string; merchant_id: string; app_id: string | null; client_id: string | null;
@@ -127,6 +128,7 @@ export default function Integracoes() {
 
       <IfoodCard />
       <LogisticsCard />
+      <ErpCard />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {PROVIDERS.map((p) => {
