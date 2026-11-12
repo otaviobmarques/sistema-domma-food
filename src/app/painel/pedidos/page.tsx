@@ -11,6 +11,7 @@ import {
 import { printTicket } from "./ticket";
 import { courierOf, statusMessage, type Order } from "./types";
 import { ChannelBadge, channelLabel, isMarketplace } from "@/components/channel-badge";
+import { CallCourier } from "./courier";
 
 
 const COLUMNS: { key: string; title: string; statuses: string[]; color: string }[] = [
@@ -456,6 +457,7 @@ function OrderDetail({ order, unitName, onClose, busy, onAction, onConfirmPix }:
           </dl>
           {o.payment_status === "paid" && !o.tab_id && o.status !== "cancelled" && <div className="mt-3"><EmitButton orderId={o.id} compact /></div>}
           <ReprintButton orderId={o.id} />
+          {o.type === "delivery" && !isMarketplace(o.channel) && <CallCourier o={o} />}
           {o.payment_status !== "paid" && o.type !== "delivery" && !o.tab_id && !isMarketplace(o.channel)
             && !["cancelled", "awaiting_payment"].includes(o.status) && o.payment_method !== "online_card" && <ReceiveAtCounter o={o} />}
         </div>

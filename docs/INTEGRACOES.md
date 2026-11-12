@@ -222,3 +222,29 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
   - Por cliente (`crm_set_tags`): até 20, normalizadas em minúsculas.
   - Em massa, para todos os clientes do filtro (`crm_bulk_tag`).
 - **Exportar CSV:** exporta o resultado filtrado, até 5.000 clientes, com segmento, etiquetas, ticket médio e aniversário.
+
+## Logística sob demanda: Foody Delivery e Entrega iFood
+
+Serve para chamar um entregador externo em pedidos de entrega de qualquer canal (cardápio, WhatsApp, balcão, telefone). Pedidos que vieram de marketplace ficam de fora, porque a logística deles é do próprio app.
+
+- **Configuração:** em **Painel › Integrações › Logística** (dono e gerência, por loja).
+  - **Foody Delivery** (padrão Open Delivery, Logistics):
+    - Na Foody, crie a credencial em Menu › Minha conta › APIs e Hooks › Criar credencial, do tipo Open Delivery.
+    - Copie para o Domma o `baseUrl`, o `clientId` e o `clientSecret`. O secret fica no Vault.
+    - Cadastre na Foody o **gatilho** (webhook) que o painel mostra: `…/functions/v1/logistics/webhook?h=<token da loja>`.
+    - O token vai em `{baseUrl}/oauth/token` (client_credentials) e é renovado sozinho. A Foody devolve `expires_in` em milissegundos e o Domma trata isso.
+  - **Entrega iFood** (Shipping API, pedidos de fora do iFood):
+    - Usa a conexão iFood da loja (Integrações › iFood) e exige o serviço contratado no Portal do Parceiro.
+    - Os eventos chegam pelo mesmo polling do iFood: `handleEvent` encaminha para a logística os eventos de entregas solicitadas pelo Domma.
+  - **Retorno à loja:** opção para o entregador voltar depois da entrega (por exemplo, para trazer a maquininha).
+- **Na tela de Pedidos**, no detalhe de um pedido de entrega:
+  - **Chamar entregador** cota os parceiros ligados ao mesmo tempo (preço e prazo). É só escolher e clicar em **Chamar**.
+  - Durante a entrega aparecem o status, o entregador, a previsão, o custo e o código de entrega, com links para rastrear e cancelar.
+  - A Entrega iFood exige o **CEP** e a **localização** (latitude e longitude) do cliente. Se o pedido não tiver, a equipe preenche na hora.
+  - A Entrega iFood aceita pedido já pago ou pago na entrega em dinheiro ou cartão. O cliente confirma a entrega com os 4 últimos dígitos do telefone.
+- **Reflexo no pedido** (`logistics_event`):
+  - Quando o entregador coleta, o pedido vai para **saiu para entrega**. Quando entrega, vai para **concluído**.
+  - Cancelamento, recusa ou falha liberam uma nova solicitação. Entrega concluída não volta atrás, e eventos fora de ordem não fazem o status regredir.
+- **Segurança:**
+  - A Edge Function confere a permissão da equipe no banco (`logistics_can`) antes de qualquer chamada. As credenciais só saem do banco para o servidor (`service_role`).
+  - O webhook da Foody exige o token da loja na URL e confere a assinatura `X-App-Signature` (HMAC-SHA256 com o clientSecret) quando ela vem. Também só aceita eventos de entregas daquela loja.
