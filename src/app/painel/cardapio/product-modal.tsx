@@ -15,8 +15,16 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
   product: Product | null; defaultCategory: string | null; data: MenuData;
   onClose: () => void; onSaved: () => void | Promise<void>;
 }) {
-  const { tenantId, unit } = usePanel();
+  const { tenantId, unit, units } = usePanel();
   const sb = supabaseBrowser();
+  // preço e disponibilidade por loja (vazio = preço padrão da rede)
+  const [perUnit, setPerUnit] = useState<Record<string, { price: string; available: boolean }>>({});
+  useEffect(() => {
+    if (!product || units.length < 2) return;
+    void sb.from("product_unit_overrides").select("unit_id, price_cents, available").eq("product_id", product.id)
+      .then(({ data: rows }: { data: { unit_id: string; price_cents: number | null; available: boolean }[] | null }) =>
+        setPerUnit(Object.fromEntries((rows ?? []).map((r) => [r.unit_id, { price: centsToInput(r.price_cents), available: r.available }]))));
+  }, [sb, product, units.length]);
   const [station, setStation] = useState(product?.station ?? "cozinha");
   const [stations, setStations] = useState<string[]>(["cozinha", "bar"]);
   useEffect(() => {
@@ -91,6 +99,19 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
       const ins = await sb.from("product_option_groups").insert(
         groupIds.map((g, i) => ({ product_id: pid, group_id: g, position: i, tenant_id: tenantId })));
       if (ins.error) { setBusy(false); setErr(errorMessage(ins.error)); return; }
+    }
+    // preço por loja: grava só o que difere do padrão
+    if (units.length > 1) {
+      for (const u of units) {
+        const v = perUnit[u.id];
+        const cents = v?.price.trim() ? parseBRL(v.price) : null;
+        if (!v || (cents == null && v.available)) {
+          await sb.from("product_unit_overrides").delete().eq("product_id", pid).eq("unit_id", u.id);
+        } else {
+          const up = await sb.from("product_unit_overrides").upsert({ product_id: pid, unit_id: u.id, tenant_id: tenantId, price_cents: cents, available: v.available });
+          if (up.error) { setBusy(false); setErr(`${u.name}: ${errorMessage(up.error)}`); return; }
+        }
+      }
     }
     setBusy(false);
     await onSaved();
@@ -203,6 +224,26 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
           <p className="mt-2 text-xs text-zinc-500">Campos vazios usam os padrões da loja definidos em Nota fiscal. Confirme estes códigos com o seu contador.</p>
         </details>
 
+        {units.length > 1 && (
+          <fieldset className="rounded-lg border border-zinc-200 p-3">
+            <legend className="px-1 text-sm font-medium">Preço e disponibilidade por loja</legend>
+            <p className="mb-2 text-xs text-zinc-500">Deixe o preço vazio para usar o padrão da rede. Desmarque para tirar o item do cardápio só daquela loja.</p>
+            <div className="space-y-2">
+              {units.map((u) => {
+                const v = perUnit[u.id] ?? { price: "", available: true };
+                const set = (p: Partial<typeof v>) => setPerUnit((x) => ({ ...x, [u.id]: { ...v, ...p } }));
+                return (
+                  <div key={u.id} className="flex items-center gap-3 text-sm">
+                    <span className="min-w-0 flex-1 truncate">{u.name}</span>
+                    <input className="input w-28" inputMode="decimal" placeholder={price || "padrão"} aria-label={`Preço em ${u.name}`}
+                      value={v.price} onChange={(e) => set({ price: e.target.value })} />
+                    <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={v.available} onChange={(e) => set({ available: e.target.checked })} /> Vende</label>
+                  </div>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
         <Alert>{err}</Alert>
         <div className="flex gap-2">
           <button className="btn-primary" disabled={busy || uploading}>{busy ? "Salvando..." : "Salvar produto"}</button>
