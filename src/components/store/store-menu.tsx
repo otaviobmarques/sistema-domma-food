@@ -9,6 +9,7 @@ import type { Store, StoreProduct } from "./types";
 import { storeColor } from "./brand";
 import { LoyaltyBanner, RatingChip, useStoreExtras } from "./loyalty";
 import { ConsentBanner } from "./consent";
+import { InstallBanner, PastOrders } from "./app-install";
 import { funnel, trackEvent } from "@/lib/tracking";
 
 const TAG_LABEL: Record<string, string> = { novo: "Novo", vegano: "Vegano", picante: "Picante", vegetariano: "Vegetariano", "sem-gluten": "Sem glúten" };
@@ -98,6 +99,7 @@ export function StoreMenu({ store }: { store: Store }) {
             {(unit.neighborhood || unit.city) && <span className="rounded-full bg-zinc-100 px-3 py-1.5 font-semibold text-zinc-700">{[unit.neighborhood, unit.city].filter(Boolean).join(" · ")}</span>}
           </div>
           <LoyaltyBanner loyalty={loyalty} color={color} />
+          <InstallBanner slug={unit.slug} name={unit.name} color={color} />
           {!unit.is_open && (
             <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200">
               A loja está fechada agora.{unit.accepts_scheduling ? " Você pode montar seu pedido e agendar para mais tarde." : " Volte no horário de funcionamento."}
@@ -122,6 +124,15 @@ export function StoreMenu({ store }: { store: Store }) {
       </div>
 
       <main className="mx-auto max-w-3xl px-4">
+        {!q && (
+          <PastOrders slug={unit.slug} menu={menu} color={color} onReorder={(items, skipped) => {
+            items.forEach((i) => cart.add(i));
+            if (items.length) { funnel(unit.slug, "add_to_cart"); setCartOpen(true); }
+            const msg = !items.length ? "Os itens desse pedido não estão disponíveis agora"
+              : skipped.length ? `Fora do cardápio agora: ${skipped.join(", ")}` : "Itens adicionados à sacola";
+            setToast(msg); setTimeout(() => setToast(""), skipped.length ? 4000 : 2000);
+          }} />
+        )}
         {!q && featured.length > 0 && (
           <section className="mt-6" aria-labelledby="destaques">
             <h2 id="destaques" className="mb-3 flex items-center gap-2 text-lg font-extrabold tracking-tight">

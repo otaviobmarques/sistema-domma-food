@@ -76,6 +76,8 @@ const nextConfig: NextConfig = {
   images: { remotePatterns: supabaseHost ? [{ protocol: "https", hostname: supabaseHost }] : [] },
   async headers() {
     return [
+      // service worker do app do cliente: sempre a versão mais nova
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }, { key: "Service-Worker-Allowed", value: "/" }] },
       // regras que não se sobrepõem (cabeçalhos repetidos seriam somados pelo navegador)
       { source: "/pedido/:path*", headers: orderHeaders },
       { source: "/loja/:path*", headers: storeHeaders },

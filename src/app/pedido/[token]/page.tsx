@@ -8,6 +8,8 @@ import { pixPayload } from "@/lib/pix";
 import { storeColor } from "@/components/store/brand";
 import { StarInput, Stars } from "@/components/store/loyalty";
 import { OnlinePayment, PaymentNote, type OrderGateway } from "./online-payment";
+import { OrderNotify } from "./notify";
+import { rememberOrder } from "@/lib/pwa";
 
 type Order = {
   number: number; status: string; type: "delivery" | "pickup" | "dine_in"; customer_name: string;
@@ -68,6 +70,9 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
   }, [token]);
 
   useEffect(() => { load(); }, [load]);
+  // guarda o pedido neste aparelho para "Seus pedidos" e "Pedir de novo" no cardápio
+  const orderSlug = order?.unit.slug;
+  useEffect(() => { if (orderSlug) rememberOrder(orderSlug, token); }, [orderSlug, token]);
   const fastPoll = order?.status === "awaiting_payment" && !!order?.gateway?.config;
   useEffect(() => {
     if (!order || FINAL.includes(order.status)) return;
@@ -195,6 +200,8 @@ export default function OrderPage({ params }: { params: Promise<{ token: string 
           })}
         </ol>
       )}
+
+      {!FINAL.includes(order.status) && <OrderNotify token={token} color={color} />}
 
       {extras && (extras.cashback_earned_cents > 0 || extras.points_earned > 0) && (
         <p className="mt-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200" aria-live="polite">

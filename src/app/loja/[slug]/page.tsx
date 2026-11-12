@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { supabaseServer } from "@/lib/supabase/server";
 import { StoreMenu } from "@/components/store/store-menu";
 import type { Store } from "@/components/store/types";
+import { storeColor } from "@/components/store/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     title: { absolute: `${u.name} · Cardápio digital` },
     description,
     openGraph: { title: u.name, description, type: "website", images: u.cover_url ? [u.cover_url] : u.logo_url ? [u.logo_url] : [] },
+    // app instalável: cada loja tem manifesto e ícone próprios
+    manifest: `/loja/${u.slug}/manifest.webmanifest`,
+    icons: { apple: [{ url: `/loja/${u.slug}/app-icon/180`, sizes: "180x180" }] },
+    appleWebApp: { capable: true, title: u.name.slice(0, 30), statusBarStyle: "default" },
   };
+}
+
+export async function generateViewport({ params }: { params: Promise<{ slug: string }> }): Promise<Viewport> {
+  const { slug } = await params;
+  const store = await getStore(slug);
+  return { themeColor: storeColor(store?.unit.primary_color), width: "device-width", initialScale: 1 };
 }
 
 export default async function StorePage({ params }: { params: Promise<{ slug: string }> }) {

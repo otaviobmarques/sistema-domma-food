@@ -1891,3 +1891,106 @@ do $$ begin
 end $$;
 reset role;
 select 'MULTIUNIDADE OK' as resultado;
+
+-- =====================================================================
+-- APP DO CLIENTE (PWA): AVISOS NO APARELHO E PEDIR DE NOVO
+-- =====================================================================
+set role anon;
+do $$ declare r jsonb; v_tok text;
+  ep text := 'https://fcm.googleapis.com/fcm/send/teste-' || md5(random()::text);
+  k text := 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4';
+begin
+  if public.push_public_key() is not null then raise exception 'FALHA chave antes de gerar'; end if;
+  r := public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+        'customer', jsonb_build_object('name','App Teste','phone','31966665555'),
+        'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 2))));
+  v_tok := r->>'token';
+  perform set_config('test.ptok', v_tok, false);
+  perform set_config('test.pend', ep, false);
+  -- endpoint fora dos serviços de push é recusado (evita usar o servidor para chamar qualquer URL)
+  begin perform public.push_subscribe(v_tok, 'https://evil.example.com/x', k, 'BTBZMqHH6r4Tts7J_aSIgg'); raise exception 'FALHA endpoint'; exception when check_violation then null; end;
+  begin perform public.push_subscribe(v_tok, 'https://fcm.googleapis.com.evil.com/x', k, 'BTBZMqHH6r4Tts7J_aSIgg'); raise exception 'FALHA endpoint 2'; exception when check_violation then null; end;
+  begin perform public.push_subscribe('token-que-nao-existe', ep, k, 'BTBZMqHH6r4Tts7J_aSIgg'); raise exception 'FALHA token'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if not public.push_subscribe(v_tok, ep, k, 'BTBZMqHH6r4Tts7J_aSIgg') then raise exception 'FALHA assinar'; end if;
+  perform public.push_subscribe(v_tok, ep, k, 'BTBZMqHH6r4Tts7J_aSIgg');   -- repetir não duplica
+  if not public.push_is_on(v_tok, ep) then raise exception 'FALHA status'; end if;
+  -- anônimo não lê as tabelas
+  begin perform 1 from public.push_subscriptions; raise exception 'FALHA anon lê'; exception when insufficient_privilege then null; end;
+  -- pedir de novo
+  r := public.my_orders('bella-massa', array[v_tok, 'outro-token']);
+  if jsonb_array_length(r) <> 1 or (r->0->'items'->0->>'quantity')::int <> 2 or r->0->'items'->0->>'product_id' <> current_setting('test.pid') then raise exception 'FALHA my_orders %', r; end if;
+  if jsonb_array_length(public.my_orders('loja-que-nao-existe', array[v_tok])) <> 0 then raise exception 'FALHA my_orders outra loja'; end if;
+  begin perform public.push_jobs(10); raise exception 'FALHA anon jobs'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ declare o public.orders; q public.push_queue;
+begin
+  if (select count(*) from public.push_subscriptions where endpoint = current_setting('test.pend')) <> 1 then raise exception 'FALHA assinatura única'; end if;
+  select * into o from public.orders where public_token = current_setting('test.ptok');
+  update public.orders set status = 'ready' where id = o.id;
+  select * into q from public.push_queue where order_id = o.id and event = 'ready';
+  if not found or q.payload->>'url' <> '/pedido/' || o.public_token or q.payload->>'title' not like '%Pronto para retirar%' then raise exception 'FALHA aviso pronto %', q; end if;
+  update public.orders set status = 'ready' where id = o.id;   -- sem mudança, sem aviso novo
+  if (select count(*) from public.push_queue where order_id = o.id) <> 1 then raise exception 'FALHA aviso duplicado'; end if;
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; v jsonb; id1 bigint;
+begin
+  v := public.push_vapid_init('BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8', '{"kty":"EC"}');
+  v := public.push_vapid_init('BOutraChaveQueNaoDeveSobrescreverAPrimeiraXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', '{"kty":"EC2"}');
+  if v->>'public' not like 'BP4z%' or v->>'private' <> '{"kty":"EC"}' then raise exception 'FALHA vapid sobrescreveu %', v; end if;
+  j := public.push_jobs(10);
+  if jsonb_array_length(j) <> 1 or j->0->>'endpoint' <> current_setting('test.pend') or (j->0->>'urgent')::boolean is not true then raise exception 'FALHA jobs %', j; end if;
+  id1 := (j->0->>'id')::bigint;
+  if jsonb_array_length(public.push_jobs(10)) <> 0 then raise exception 'FALHA job pego duas vezes'; end if;
+  perform public.push_job_result(id1, false, false, 'erro temporário');
+  if (select status from public.push_queue where id = id1) <> 'queued' then raise exception 'FALHA retentativa'; end if;
+  update public.push_queue set next_attempt_at = now() where id = id1;
+  j := public.push_jobs(10);
+  perform public.push_job_result(id1, true);
+  if (select status from public.push_queue where id = id1) <> 'sent' then raise exception 'FALHA enviado'; end if;
+end $$;
+reset role;
+do $$ declare o public.orders; id2 bigint; begin
+  select * into o from public.orders where public_token = current_setting('test.ptok');
+  update public.orders set status = 'completed' where id = o.id;
+  select id into id2 from public.push_queue where order_id = o.id and event = 'completed';
+  if id2 is null then raise exception 'FALHA aviso concluído'; end if;
+  perform set_config('test.pid2', id2::text, false);
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ begin
+  perform public.push_jobs(10);
+  perform public.push_job_result(current_setting('test.pid2')::bigint, false, true, '410 Gone');
+end $$;
+reset role;
+do $$ begin
+  -- assinatura cancelada pelo navegador some, junto com os vínculos
+  if exists (select 1 from public.push_subscriptions where endpoint = current_setting('test.pend')) then raise exception 'FALHA gone'; end if;
+  if exists (select 1 from public.push_order_links l join public.orders o on o.id = l.order_id where o.public_token = current_setting('test.ptok')) then raise exception 'FALHA vínculo gone'; end if;
+end $$;
+set role anon;
+do $$ begin
+  if public.push_public_key() not like 'BP4z%' then raise exception 'FALHA chave pública'; end if;
+  -- pedido encerrado não aceita novos avisos
+  begin perform public.push_subscribe(current_setting('test.ptok'), current_setting('test.pend'),
+    'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', 'BTBZMqHH6r4Tts7J_aSIgg'); raise exception 'FALHA encerrado';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.push_stats(current_setting('test.funit')::uuid); raise exception 'FALHA anon stats'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare s jsonb; begin
+  s := public.push_stats((select id from public.units where slug = 'bella-massa'));
+  if (s->>'ready')::boolean is not true or (s->>'sent_30d')::int < 1 or (s->>'orders_with_push_30d')::int <> 0 then raise exception 'FALHA stats %', s; end if;
+end $$;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.push_stats((select id from public.units where slug = 'bella-massa')); raise exception 'FALHA cozinha stats'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'APP DO CLIENTE OK' as resultado;
