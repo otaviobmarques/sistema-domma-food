@@ -1721,3 +1721,106 @@ do $$ begin
 end $$;
 reset role;
 select 'LOGISTICA OK' as resultado;
+
+-- =====================================================================
+-- F360 + OPEN DELIVERY (PDV / Eclética)
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare u uuid := current_setting('test.funit')::uuid; c jsonb; o jsonb; begin
+  begin perform public.erp_save(u, '{"f360_url":"https://evil.com/x/f360-cupom-fiscal"}'); raise exception 'FALHA url'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.erp_save(u, '{"f360_cnpj":"11.222.333/0001-82"}'); raise exception 'FALHA cnpj'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.erp_save(u, '{"f360_enabled":true}'); raise exception 'FALHA ligar f360'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.erp_save(u, '{"od_enabled":true}'); raise exception 'FALHA ligar od'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.erp_save(u, '{"f360_url":"https://webhook.f360.com.br/abc123-servico","f360_cnpj":"11.222.333/0001-81","f360_enabled":true}');
+  c := public.erp_od_credentials(u);
+  if c->>'client_id' !~ '^dmo_' or c->>'client_secret' !~ '^dms_' then raise exception 'FALHA credenciais %', c; end if;
+  perform set_config('test.od_id', c->>'client_id', false); perform set_config('test.od_secret', c->>'client_secret', false);
+  perform public.erp_save(u, '{"od_enabled":true,"od_channels":["web","whatsapp","hack"]}');
+  o := public.erp_overview(u);
+  if not (o->'f360'->>'enabled')::boolean or o->'f360'->>'cnpj' <> '11222333000181' or o::text like '%abc123-servico%'
+     or o->'od'->'channels' <> '["web","whatsapp"]'::jsonb or not (o->'od'->>'has_secret')::boolean then raise exception 'FALHA overview %', o; end if;
+end $$;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  begin perform public.erp_overview(current_setting('test.funit')::uuid); raise exception 'FALHA caixa'; exception when insufficient_privilege then null; end;
+  begin perform public.erp_od_credentials(current_setting('test.funit')::uuid); raise exception 'FALHA caixa cred'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+-- pedido do cardápio entra → evento CREATED para o PDV
+do $$ declare t uuid := current_setting('test.wt')::uuid; u uuid := current_setting('test.funit')::uuid; o uuid; pid uuid := current_setting('test.pid')::uuid; begin
+  insert into public.orders (tenant_id, unit_id, number, channel, type, status, customer_name, customer_phone, address,
+    subtotal_cents, delivery_fee_cents, discount_cents, total_cents, payment_method, payment_status, change_for_cents)
+  values (t, u, 99201, 'web', 'delivery', 'pending', 'Cliente ERP', '31977776666', '{"street":"Rua B","number":"20","neighborhood":"Centro","city":"BH","lat":-19.9,"lng":-43.9}',
+    5000, 700, 500, 5200, 'cash', 'pending', 6000) returning id into o;
+  insert into public.order_items (tenant_id, order_id, product_id, name, quantity, unit_price_cents, total_cents, options)
+  values (t, o, pid, 'Pizza', 1, 5000, 5000, '[{"name":"Borda","quantity":1,"price_cents":0}]');
+  update public.products set pdv_code = 'ECL-001' where id = pid;
+  perform set_config('test.eo', o::text, false);
+  -- pedido de marketplace (fora dos canais) não vai para o PDV
+  insert into public.orders (tenant_id, unit_id, number, channel, type, status, customer_name, customer_phone, subtotal_cents, total_cents, payment_method, payment_status)
+  values (t, u, 99202, 'ifood', 'pickup', 'pending', 'iFood', '31900000000', 100, 100, 'online_card', 'paid');
+  if (select count(*) from public.od_events where order_id = o and event_type = 'CREATED') <> 1 then raise exception 'FALHA evento created'; end if;
+  if exists (select 1 from public.od_events e join public.orders x on x.id = e.order_id where x.number = 99202) then raise exception 'FALHA canal filtrado'; end if;
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare tk jsonb; u uuid; ev jsonb; o jsonb; oid uuid := current_setting('test.eo')::uuid; begin
+  if public.od_issue_token(current_setting('test.od_id'), 'errado') is not null then raise exception 'FALHA token com segredo errado'; end if;
+  tk := public.od_issue_token(current_setting('test.od_id'), current_setting('test.od_secret'));
+  u := public.od_unit(tk->>'access_token');
+  if u <> current_setting('test.funit')::uuid then raise exception 'FALHA token'; end if;
+  if public.od_unit('dmt_falso') is not null then raise exception 'FALHA token falso'; end if;
+  ev := public.od_poll(u);
+  if jsonb_array_length(ev) <> 1 or ev->0->>'eventType' <> 'CREATED' then raise exception 'FALHA polling %', ev; end if;
+  o := public.od_order(u, oid);
+  if o->>'type' <> 'DELIVERY' or o->'items'->0->>'externalCode' <> 'ECL-001' or (o->'total'->'orderAmount'->>'value')::numeric <> 52
+     or o->'payments'->'methods'->0->>'method' <> 'CASH' or (o->'payments'->'methods'->0->>'changeFor')::numeric <> 60
+     or o->'delivery'->'deliveryAddress'->>'district' <> 'Centro' or jsonb_array_length(o->'items'->0->'options') <> 1 then raise exception 'FALHA pedido OD %', o; end if;
+  if public.od_order(u, gen_random_uuid()) is not null then raise exception 'FALHA pedido inexistente'; end if;
+  if public.od_ack(u, array[(ev->0->>'eventId')::uuid]) <> 1 then raise exception 'FALHA ack'; end if;
+  if jsonb_array_length(public.od_poll(u)) <> 0 then raise exception 'FALHA ack não limpou'; end if;
+  -- PDV confirma: pedido vai para preparo sem devolver evento (eco)
+  if public.od_action(u, oid, 'confirm', '{"orderExternalCode":"E1","createdAt":"2026-01-01T00:00:00Z","preparationTime":25}') <> 'ok' then raise exception 'FALHA confirm'; end if;
+  if (select status from public.orders where id = oid) <> 'preparing' or jsonb_array_length(public.od_poll(u)) <> 0 then raise exception 'FALHA eco confirm'; end if;
+  perform public.od_action(u, oid, 'dispatch', '{}');
+  if (select status from public.orders where id = oid) <> 'dispatched' then raise exception 'FALHA dispatch'; end if;
+  perform public.od_action(u, oid, 'delivered', '{}');
+  if (select status from public.orders where id = oid) <> 'completed' then raise exception 'FALHA delivered'; end if;
+  -- concluído vai para a fila do F360
+  if (select count(*) from public.f360_queue where order_id = oid and kind = 'sale' and status = 'queued') <> 1 then raise exception 'FALHA fila f360'; end if;
+  perform set_config('test.u', u::text, false);
+end $$;
+do $$ declare j jsonb; p jsonb; oid uuid := current_setting('test.eo')::uuid; begin
+  j := public.f360_jobs(10);
+  if jsonb_array_length(j) <> 1 or j->0->>'url' <> 'https://webhook.f360.com.br/abc123-servico/f360-cupom-fiscal' then raise exception 'FALHA job %', j; end if;
+  p := j->0->'payload';
+  if p->>'NomeSistema' <> 'Domma Food' or p->'Values'->0->>'CNPJEmitente' <> '11222333000181' or p->'Values'->0->>'NumeroCupom' <> '99201'
+     or p->'Values'->0->'MeioPagamento'->0->>'FormaPagamento' <> 'Dinheiro' or (p->'Values'->0->'MeioPagamento'->0->>'Valor')::numeric <> 52
+     or (p->'Values'->0->>'ValorFrete')::numeric <> 7 or p->'Values'->0 ? 'VendaCancelada' then raise exception 'FALHA payload %', p; end if;
+  if jsonb_array_length(public.f360_jobs(10)) <> 0 then raise exception 'FALHA job duplicado'; end if;
+  perform public.f360_job_result((j->0->>'id')::bigint, true, null);
+  if (select status from public.f360_queue where id = (j->0->>'id')::bigint) <> 'sent' then raise exception 'FALHA resultado'; end if;
+end $$;
+reset role;
+-- venda concluída cancelada depois → cupom de cancelamento
+update public.orders set status = 'cancelled' where id = current_setting('test.eo')::uuid;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; begin
+  j := public.f360_jobs(10);
+  if jsonb_array_length(j) <> 1 or not (j->0->'payload'->'Values'->0->>'VendaCancelada')::boolean then raise exception 'FALHA cancel f360 %', j; end if;
+  perform public.f360_job_result((j->0->>'id')::bigint, false, 'HTTP 500');
+  if (select status from public.f360_queue where id = (j->0->>'id')::bigint) <> 'queued' then raise exception 'FALHA retry'; end if;
+  -- PDV cancela outro pedido: evento CANCELLED volta (confirmação do cancelamento)
+end $$;
+reset role;
+set request.jwt.claims = '{}';
+set role anon;
+do $$ begin
+  begin perform public.od_issue_token(current_setting('test.od_id'), current_setting('test.od_secret')); raise exception 'FALHA anon token'; exception when insufficient_privilege then null; end;
+  begin perform public.f360_jobs(1); raise exception 'FALHA anon jobs'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'ERP OK' as resultado;

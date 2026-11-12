@@ -27,6 +27,7 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
   const [description, setDescription] = useState(product?.description ?? "");
   const [price, setPrice] = useState(centsToInput(product?.price_cents ?? null));
   const [promo, setPromo] = useState(centsToInput(product?.promo_price_cents ?? null));
+  const [pdvCode, setPdvCode] = useState(product?.pdv_code ?? "");
   const [categoryId, setCategoryId] = useState(product?.category_id ?? defaultCategory ?? data.categories[0]?.id ?? "");
   const [featured, setFeatured] = useState(product?.featured ?? false);
   const [tags, setTags] = useState<string[]>(product?.tags ?? []);
@@ -69,7 +70,7 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
     if (promoCents != null && promoCents >= priceCents) { setErr("O preço promocional deve ser menor que o preço normal."); return; }
     setBusy(true);
     const row = {
-      name: name.trim(), description: description.trim() || null, price_cents: priceCents, promo_price_cents: promoCents,
+      name: name.trim(), description: description.trim() || null, price_cents: priceCents, promo_price_cents: promoCents, pdv_code: pdvCode.trim().slice(0, 60) || null,
       category_id: categoryId, featured, tags, image_url: imageUrl, sku: sku.trim() || null, station: station || "cozinha",
       ncm: fiscal.ncm.trim() || null, cfop: fiscal.cfop.trim() || null, csosn: fiscal.csosn.trim() || null, cest: fiscal.cest.trim() || null,
       fiscal_origin: origin || null, fiscal_unit: (fiscalUnit.trim() || "UN").toUpperCase().slice(0, 6),
@@ -120,6 +121,7 @@ export function ProductModal({ product, defaultCategory, data, onClose, onSaved 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Field label="Preço (R$)"><input className="input" required inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0,00" /></Field>
               <Field label="Promoção (R$)" hint="Opcional"><input className="input" inputMode="decimal" value={promo} onChange={(e) => setPromo(e.target.value)} placeholder="—" /></Field>
+              <Field label="Código no PDV" hint="Opcional: código do produto no PDV (Eclética etc.)"><input className="input" maxLength={60} value={pdvCode} onChange={(e) => setPdvCode(e.target.value)} placeholder="—" /></Field>
               <Field label="Categoria">
                 <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                   {data.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

@@ -248,3 +248,45 @@ Serve para chamar um entregador externo em pedidos de entrega de qualquer canal 
 - **Segurança:**
   - A Edge Function confere a permissão da equipe no banco (`logistics_can`) antes de qualquer chamada. As credenciais só saem do banco para o servidor (`service_role`).
   - O webhook da Foody exige o token da loja na URL e confere a assinatura `X-App-Signature` (HMAC-SHA256 com o clientSecret) quando ela vem. Também só aceita eventos de entregas daquela loja.
+
+## Gestão: F360 Finanças e PDV pelo Open Delivery (Eclética)
+
+Configuração em **Painel › Integrações › Gestão** (dono e gerência, por loja).
+
+### F360 Finanças (Webhook F360 - PDV)
+
+- **No F360:** Webservices › Novo › **Webhook F360 - PDV**. A URL aparece na coluna Outros (`https://webhook.f360.com.br/<id>/f360-cupom-fiscal`). Cole no Domma com o **CNPJ** da loja cadastrado no F360.
+  - Se a loja tem Nota fiscal configurada, o CNPJ vem preenchido de lá.
+  - A URL fica no Vault.
+- **O que vai:**
+  - Cada pedido **concluído** depois de ligar a integração vira um cupom (`NumeroCupom` = número do pedido, `CodigoExternoCupom` = id do pedido).
+  - O cupom leva as formas de pagamento recebidas e o frete.
+  - Se uma venda concluída for cancelada, vai o mesmo cupom com `VendaCancelada: true`.
+- **Envio:**
+  - Fila `f360_queue`, despachada pelo cron `domma-erp` a cada 5 min (`erp/f360/worker`).
+  - Até 6 tentativas com intervalo crescente. Depois disso fica "Falhou", com o botão **Reenviar**.
+  - Uma requisição por cupom, que é o que o F360 pede (um CNPJ e um dia por requisição; o mesmo cupom não pode ir em requisições separadas).
+- **Formas de pagamento:** Dinheiro, PIX, Cartao Debito, Cartao Credito, Voucher, Crediario.
+  - O cartão na entrega vai como Cartao Credito, porque o Domma não sabe se foi débito ou crédito.
+  - A bandeira só é preenchida no Pix.
+- O F360 processa em até 1 hora. Confira em Upload de Arquivos no F360.
+
+### PDV pelo Open Delivery (Eclética ou outro aderente)
+
+- **Papel do Domma:** Ordering Application do padrão Open Delivery (Pedidos). A Eclética é aderente e recebe os eventos por **polling**.
+- **Credenciais:** o painel gera `clientId` e `clientSecret`. O segredo aparece uma vez e fica guardado só como hash. A loja envia ao time do PDV:
+  - a **Base URL** `https://<projeto>.supabase.co/functions/v1/od`;
+  - o **merchantId** (id da loja);
+  - o clientId e o clientSecret.
+- **Rotas** (função `od`):
+  - `POST /oauth/token`: client_credentials, token de 1 hora.
+  - `GET /v1/events:polling`: 200 com a lista ou 204 vazio; filtros `x-polling-merchants` e `eventType`.
+  - `POST /v1/events/acknowledgment`.
+  - `GET /v1/orders/{id}`: pedido no formato Open Delivery, com itens, adicionais, taxas, descontos, pagamento, troco, endereço com coordenadas e agendamento.
+  - `POST /v1/orders/{id}/confirm | preparing | readyForPickup | dispatch | delivered | pickedUp | requestCancellation`.
+- **Eventos enviados:**
+  - CREATED quando o pedido entra. Pedido com Pix entra só depois de pago.
+  - CONFIRMED, PREPARING, READY_FOR_PICKUP, DISPATCHED, CONCLUDED e CANCELLED.
+  - O que o próprio PDV fez não volta como evento.
+- **Canais:** escolha quais vão para o PDV. Por padrão vão cardápio, WhatsApp, totem, mesa, telefone e balcão; marketplaces ficam de fora para não duplicar pedido.
+- **De-para dos itens:** o campo **Código no PDV** do produto (e do adicional) vai como `externalCode`. Sem ele, vai o id do Domma.
