@@ -9,7 +9,7 @@ import { Automations } from "./automations";
 import { WhatsAppSettings } from "./settings";
 import { StatusNotices } from "./status";
 import { TrackingSettings } from "./tracking";
-import type { Settings } from "./shared";
+import type { Segment, Settings } from "./shared";
 
 type Tab = "campaigns" | "automations" | "status" | "tracking" | "whatsapp";
 const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["status", "Avisos de pedido"], ["tracking", "Anúncios e métricas"], ["whatsapp", "WhatsApp"]];
@@ -21,6 +21,14 @@ export default function Marketing() {
   const [s, setS] = useState<Settings | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState("");
+  // campanha criada a partir de um filtro do CRM (Clientes › Criar campanha)
+  const [crmSeg, setCrmSeg] = useState<Segment | null>(null);
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("df_crm_campaign");
+      if (raw) { sessionStorage.removeItem("df_crm_campaign"); setCrmSeg(JSON.parse(raw) as Segment); setTab("campaigns"); }
+    } catch { /* ignora */ }
+  }, []);
   const load = useCallback(async () => {
     const { data, error } = await sb.from("marketing_settings").select("*").eq("tenant_id", tenantId).maybeSingle();
     if (error) setErr(errorMessage(error)); else setS((data as Settings | null) ?? null);
@@ -47,7 +55,7 @@ export default function Marketing() {
         ))}
       </div>
       <Alert>{err}</Alert>
-      {loaded && tab === "campaigns" && <Campaigns apiReady={apiReady} />}
+      {loaded && tab === "campaigns" && <Campaigns key={crmSeg ? "crm" : "std"} apiReady={apiReady} initialSeg={crmSeg} />}
       {loaded && tab === "automations" && <Automations apiReady={apiReady} freqDays={s?.frequency_days ?? 7} />}
       {loaded && tab === "status" && <StatusNotices />}
       {loaded && tab === "tracking" && <TrackingSettings />}

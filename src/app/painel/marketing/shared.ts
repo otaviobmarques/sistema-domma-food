@@ -1,4 +1,5 @@
-export type Segment = { type: "all" | "inactive" | "new" | "top" | "birthday_month" | "birthday_today"; days?: number; min_orders?: number };
+export type Segment = { type: "all" | "inactive" | "new" | "top" | "birthday_month" | "birthday_today" | "crm"; days?: number; min_orders?: number;
+  filter?: Record<string, unknown>; name?: string };
 export type Campaign = {
   id: string; tenant_id: string; unit_id: string | null; name: string; kind: "manual" | "birthday" | "winback";
   segment: Segment; channel: "manual_links" | "whatsapp_api"; message: string;
@@ -22,12 +23,13 @@ export type Settings = {
 
 export const SEGMENT_LABEL: Record<Segment["type"], string> = {
   all: "Todos que autorizaram", inactive: "Clientes sumidos", new: "Clientes novos", top: "Clientes frequentes",
-  birthday_month: "Aniversariantes do mês", birthday_today: "Aniversariantes do dia",
+  birthday_month: "Aniversariantes do mês", birthday_today: "Aniversariantes do dia", crm: "Filtro do CRM",
 };
 export function segmentText(s: Segment) {
   if (s.type === "inactive") return `Sem pedir há ${s.days ?? 30}+ dias`;
   if (s.type === "new") return `1º pedido nos últimos ${s.days ?? 30} dias`;
   if (s.type === "top") return `${s.min_orders ?? 5}+ pedidos`;
+  if (s.type === "crm") return `CRM: ${s.name ?? "filtro personalizado"}`;
   return SEGMENT_LABEL[s.type] ?? s.type;
 }
 export const CAMPAIGN_STATUS: Record<Campaign["status"], { label: string; cls: string }> = {

@@ -7,13 +7,13 @@ import { brl, errorMessage, formatPhone } from "@/lib/format";
 import { MessageEditor, blankMessage, messagePayload, type MessageForm } from "./editor";
 import { CAMPAIGN_STATUS, MESSAGE_STATUS, SEGMENT_LABEL, fmtDate, segmentText, type Campaign, type Message, type Segment, type Stats } from "./shared";
 
-export function Campaigns({ apiReady }: { apiReady: boolean }) {
+export function Campaigns({ apiReady, initialSeg }: { apiReady: boolean; initialSeg?: Segment | null }) {
   const { tenantId } = usePanel();
   const sb = supabaseBrowser();
   const [rows, setRows] = useState<Campaign[]>([]);
   const [stats, setStats] = useState<Record<string, Stats>>({});
   const [err, setErr] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(!!initialSeg);
   const [detail, setDetail] = useState<Campaign | null>(null);
   const load = useCallback(async () => {
     const [a, b] = await Promise.all([
@@ -70,17 +70,21 @@ export function Campaigns({ apiReady }: { apiReady: boolean }) {
           </table>
         </div>
       )}
-      {creating && <NewCampaign apiReady={apiReady} onClose={() => setCreating(false)} onSaved={async () => { setCreating(false); await load(); }} />}
+      {creating && <NewCampaign apiReady={apiReady} initialSeg={initialSeg} onClose={() => setCreating(false)} onSaved={async () => { setCreating(false); await load(); }} />}
       {detail && <CampaignDetail campaign={detail} stats={stats[detail.id]} onClose={() => setDetail(null)} onChanged={load} />}
     </div>
   );
 }
 
-function NewCampaign({ apiReady, onClose, onSaved }: { apiReady: boolean; onClose: () => void; onSaved: () => Promise<void> }) {
+function NewCampaign({ apiReady, onClose, onSaved, initialSeg }: { apiReady: boolean; onClose: () => void; onSaved: () => Promise<void>; initialSeg?: Segment | null }) {
   const { tenantId, unit } = usePanel();
   const sb = supabaseBrowser();
   const [name, setName] = useState("");
-  const [seg, setSeg] = useState<Segment>({ type: "inactive", days: 30 });
+  const [seg, setSeg] = useState<Segment>(initialSeg ?? { type: "inactive", days: 30 });
+  const [saved, setSaved] = useState<{ id: string; name: string; filter: Record<string, unknown> }[]>([]);
+  useEffect(() => {
+    sb.rpc("crm_options", { p_tenant_id: tenantId }).then(({ data }: { data: { segments?: { id: string; name: string; filter: Record<string, unknown> }[] } | null }) => setSaved(data?.segments ?? []));
+  }, [sb, tenantId]);
   const [f, setF] = useState<MessageForm>(blankMessage());
   const [count, setCount] = useState<{ eligible: number; opted_in: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,7 +108,7 @@ function NewCampaign({ apiReady, onClose, onSaved }: { apiReady: boolean; onClos
     if (error) { setErr(errorMessage(error)); return; }
     await onSaved();
   }
-  const types = useMemo(() => (["inactive", "new", "top", "birthday_month", "all"] as const), []);
+  const types = useMemo(() => (["inactive", "new", "top", "birthday_month", "all", ...(saved.length || seg.type === "crm" ? ["crm" as const] : [])] as const), [saved.length, seg.type]);
 
   return (
     <Modal open onClose={onClose} title="Nova campanha" wide>
@@ -116,7 +120,8 @@ function NewCampaign({ apiReady, onClose, onSaved }: { apiReady: boolean; onClos
             {types.map((t) => (
               <label key={t} className={`cursor-pointer rounded-lg border px-3 py-1.5 ${seg.type === t ? "border-brand-500 bg-brand-50 text-brand-700" : "border-zinc-200"}`}>
                 <input type="radio" className="sr-only" checked={seg.type === t}
-                  onChange={() => setSeg(t === "inactive" ? { type: t, days: 30 } : t === "new" ? { type: t, days: 30 } : t === "top" ? { type: t, min_orders: 5 } : { type: t })} />
+                  onChange={() => setSeg(t === "inactive" ? { type: t, days: 30 } : t === "new" ? { type: t, days: 30 } : t === "top" ? { type: t, min_orders: 5 }
+                    : t === "crm" ? (seg.type === "crm" ? seg : { type: t, name: saved[0]?.name, filter: saved[0]?.filter ?? {} }) : { type: t })} />
                 {SEGMENT_LABEL[t]}
               </label>
             ))}
@@ -124,6 +129,16 @@ function NewCampaign({ apiReady, onClose, onSaved }: { apiReady: boolean; onClos
           {(seg.type === "inactive" || seg.type === "new") && (
             <div className="mt-3 w-48"><Field label={seg.type === "inactive" ? "Sem pedir há (dias)" : "1º pedido nos últimos (dias)"}>
               <input className="input" type="number" min={1} max={365} value={seg.days ?? 30} onChange={(e) => setSeg({ ...seg, days: Number(e.target.value) || 30 })} />
+            </Field></div>
+          )}
+          {seg.type === "crm" && (
+            <div className="mt-3 max-w-sm"><Field label="Filtro salvo no CRM" hint="Crie e salve filtros em Clientes. Só recebe quem autorizou marketing.">
+              <select className="input" value={saved.find((x) => x.name === seg.name)?.id ?? ""} onChange={(e) => {
+                const x = saved.find((y) => y.id === e.target.value); if (x) setSeg({ type: "crm", name: x.name, filter: x.filter });
+              }}>
+                {!saved.some((x) => x.name === seg.name) && <option value="">{seg.name ?? "Filtro atual do CRM"}</option>}
+                {saved.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
             </Field></div>
           )}
           {seg.type === "top" && (

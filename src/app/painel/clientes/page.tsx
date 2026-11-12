@@ -1,5 +1,7 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FilterPanel, SEGMENTS, activeCount, describe, type Filter, type Options } from "./filters";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { usePanel } from "@/lib/panel/context";
 import { Alert, Empty, Field, Modal } from "@/components/ui";
@@ -9,6 +11,7 @@ type Customer = {
   id: string; name: string; phone: string; email: string | null; opt_in_marketing: boolean;
   orders_count: number; total_spent_cents: number; first_order_at: string | null; last_order_at: string | null; created_at: string;
   cashback_cents: number; points_balance: number; marketing_opt_out_at?: string | null;
+  tags?: string[]; segment?: string; birthday?: string | null; credit_balance_cents?: number;
 };
 type Ledger = { id: number; kind: "cashback" | "points"; amount: number; reason: string; note: string | null; expires_at: string | null; created_at: string };
 type Reward = { id: string; name: string; description: string | null; points_cost: number };
@@ -139,51 +142,121 @@ function LoyaltyModal({ customer, canAdjust, onClose, onChanged }: { customer: C
   );
 }
 
-const SORTS = {
-  recent: { label: "Último pedido", col: "last_order_at" },
-  orders: { label: "Mais pedidos", col: "orders_count" },
-  spent: { label: "Maior gasto", col: "total_spent_cents" },
-  new: { label: "Mais novos", col: "created_at" },
-} as const;
+const SORTS: Record<string, string> = {
+  recent: "Último pedido", oldest: "Sumidos há mais tempo", spent: "Maior gasto", orders: "Mais pedidos",
+  ticket: "Maior ticket médio", cashback: "Mais cashback", name: "Nome (A–Z)",
+};
+const PAGE = 50;
+type Result = { total: number; summary: { spent_cents: number; orders: number; opted_in: number; cashback_cents: number }; rows: Customer[] };
 
-function segment(c: Customer) {
-  const days = c.last_order_at ? (Date.now() - new Date(c.last_order_at).getTime()) / 86400000 : Infinity;
-  if (c.orders_count === 0) return { label: "Sem pedido concluído", cls: "bg-zinc-100 text-zinc-600" };
-  if (days > 60) return { label: "Inativo", cls: "bg-zinc-200 text-zinc-700" };
-  if (days > 30) return { label: "Em risco", cls: "bg-amber-100 text-amber-800" };
-  if (c.orders_count >= 5) return { label: "Fiel", cls: "bg-green-100 text-green-800" };
-  if (c.orders_count === 1) return { label: "Novo", cls: "bg-brand-100 text-brand-800" };
-  return { label: "Recorrente", cls: "bg-sky-50 text-sky-800" };
+function TagsModal({ c, onClose, onSaved }: { c: Customer; onClose: () => void; onSaved: () => void }) {
+  const sb = supabaseBrowser();
+  const [txt, setTxt] = useState((c.tags ?? []).join(", "));
+  const [err, setErr] = useState("");
+  async function save() {
+    const { error } = await sb.rpc("crm_set_tags", { p_customer_id: c.id, p_tags: txt.split(",").map((t) => t.trim()).filter(Boolean) });
+    if (error) setErr(errorMessage(error)); else { onSaved(); onClose(); }
+  }
+  return (
+    <Modal open onClose={onClose} title={`Etiquetas · ${c.name}`}>
+      <Field label="Etiquetas separadas por vírgula" hint="Ex.: vip, empresa, prefere pizza doce. Até 20.">
+        <input className="input" value={txt} onChange={(e) => setTxt(e.target.value)} autoFocus />
+      </Field>
+      <Alert>{err}</Alert>
+      <div className="mt-4 flex justify-end gap-2"><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={save}>Salvar</button></div>
+    </Modal>
+  );
 }
 
 export default function Clientes() {
   const { tenantId, role } = usePanel();
   const sb = supabaseBrowser();
+  const router = useRouter();
+  const [f, setF] = useState<Filter>({});
+  const [ver, setVer] = useState(0);               // remonta o painel de filtros ao limpar/carregar
+  const [open, setOpen] = useState(false);
+  const [sort, setSort] = useState("recent");
+  const [res, setRes] = useState<Result | null>(null);
   const [rows, setRows] = useState<Customer[]>([]);
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState<keyof typeof SORTS>("recent");
+  const [opts, setOpts] = useState<Options | null>(null);
+  const [current, setCurrent] = useState<string | null>(null);   // filtro salvo selecionado
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+  const [tag, setTag] = useState("");
   const [loyalty, setLoyalty] = useState<Customer | null>(null);
+  const [tagsOf, setTagsOf] = useState<Customer | null>(null);
+  const req = useRef(0);
+  const manager = role === "owner" || role === "manager";
 
-  const load = useCallback(async () => {
-    const { data, error } = await sb.from("customers").select("*").eq("tenant_id", tenantId)
-      .order(SORTS[sort].col, { ascending: false, nullsFirst: false }).limit(1000);
-    if (error) setErr(error.message); else setRows(data as Customer[]);
-  }, [sb, tenantId, sort]);
-  useEffect(() => { load(); }, [load]);
+  const loadOpts = useCallback(async () => {
+    const { data, error } = await sb.rpc("crm_options", { p_tenant_id: tenantId });
+    if (error) setErr(errorMessage(error)); else setOpts(data as Options);
+  }, [sb, tenantId]);
+  useEffect(() => { void loadOpts(); }, [loadOpts]);
 
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    const d = t.replace(/\D/g, "");
-    return t ? rows.filter((r) => r.name.toLowerCase().includes(t) || (d && r.phone.includes(d))) : rows;
-  }, [rows, q]);
+  const fKey = JSON.stringify(f);
+  const load = useCallback(async (offset = 0) => {
+    const id = ++req.current;
+    setLoading(true);
+    const { data, error } = await sb.rpc("crm_search", { p_tenant_id: tenantId, p_filter: f, p_sort: sort, p_limit: PAGE, p_offset: offset });
+    if (id !== req.current) return;
+    setLoading(false);
+    if (error) { setErr(errorMessage(error)); return; }
+    const r = data as Result;
+    setRes(r); setRows((prev) => (offset ? [...prev, ...r.rows] : r.rows)); setErr("");
+  }, [sb, tenantId, fKey, sort]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const t = setTimeout(() => void load(0), 300); return () => clearTimeout(t); }, [load]);
 
-  function exportCsv() {
-    const head = ["nome", "whatsapp", "email", "pedidos", "total_gasto", "ultimo_pedido", "aceita_marketing", "cashback", "pontos"];
+  const patch = (p: Filter) => { setF((x) => { const n = { ...x, ...p }; for (const k of Object.keys(n) as (keyof Filter)[]) if (n[k] === undefined) delete n[k]; return n; }); setCurrent(null); };
+  const chips = useMemo(() => describe(f, opts), [f, opts]);
+  const n = activeCount(f);
+
+  function applySaved(id: string) {
+    const s = opts?.segments.find((x) => x.id === id);
+    if (!s) return;
+    setF({ ...(s.filter ?? {}) }); setCurrent(s.id); setVer((v) => v + 1);
+  }
+  function clear() { setF({}); setCurrent(null); setVer((v) => v + 1); }
+
+  async function saveFilter() {
+    const s = opts?.segments.find((x) => x.id === current);
+    const name = prompt("Nome do filtro (ex.: Sumidos que gastam bem):", s?.name ?? "");
+    if (!name?.trim()) return;
+    const { data, error } = await sb.rpc("crm_segment_save", { p_tenant_id: tenantId, p_name: name, p_filter: f, p_id: s && s.name === name.trim() ? s.id : null });
+    if (error) { setErr(errorMessage(error)); return; }
+    await loadOpts(); setCurrent(data as string); setMsg("Filtro salvo. Ele também aparece como público em Marketing › Campanhas.");
+  }
+  async function deleteFilter() {
+    const s = opts?.segments.find((x) => x.id === current);
+    if (!s || !confirm(`Apagar o filtro salvo "${s.name}"?`)) return;
+    const { error } = await sb.rpc("crm_segment_delete", { p_id: s.id });
+    if (error) setErr(errorMessage(error)); else { setCurrent(null); await loadOpts(); }
+  }
+  async function bulkTag(add: boolean) {
+    if (!tag.trim() || !res) return;
+    if (!confirm(`${add ? "Adicionar" : "Remover"} a etiqueta "${tag.trim()}" ${add ? "em" : "de"} ${res.total} cliente(s) do filtro?`)) return;
+    const { data, error } = await sb.rpc("crm_bulk_tag", { p_tenant_id: tenantId, p_filter: f, p_tag: tag, p_add: add });
+    if (error) { setErr(errorMessage(error)); return; }
+    setMsg(`${data} cliente(s) atualizados.`); setTag(""); await Promise.all([load(0), loadOpts()]);
+  }
+  function campaign() {
+    const s = opts?.segments.find((x) => x.id === current);
+    try { sessionStorage.setItem("df_crm_campaign", JSON.stringify({ type: "crm", name: s?.name ?? "Filtro atual do CRM", filter: f })); } catch { /* ignora */ }
+    router.push("/painel/marketing");
+  }
+
+  async function exportCsv() {
+    const { data, error } = await sb.rpc("crm_search", { p_tenant_id: tenantId, p_filter: f, p_sort: sort, p_limit: 5000, p_offset: 0 });
+    if (error) { setErr(errorMessage(error)); return; }
+    const list = (data as Result).rows;
+    const head = ["nome", "whatsapp", "email", "segmento", "etiquetas", "pedidos", "total_gasto", "ticket_medio", "primeiro_pedido", "ultimo_pedido", "aniversario", "aceita_marketing", "cashback", "pontos"];
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = filtered.map((r) => [r.name, r.phone, r.email, r.orders_count, (r.total_spent_cents / 100).toFixed(2),
-      r.last_order_at?.slice(0, 10), r.opt_in_marketing ? "sim" : "nao", ((r.cashback_cents ?? 0) / 100).toFixed(2), r.points_balance ?? 0].map(esc).join(";"));
-    const blob = new Blob(["﻿" + [head.join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+    const lines = list.map((r) => [r.name, r.phone, r.email, SEGMENTS.find((x) => x[0] === r.segment)?.[1], (r.tags ?? []).join(", "), r.orders_count,
+      (r.total_spent_cents / 100).toFixed(2), r.orders_count ? (r.total_spent_cents / r.orders_count / 100).toFixed(2) : "",
+      r.first_order_at?.slice(0, 10), r.last_order_at?.slice(0, 10), r.birthday ?? "", r.opt_in_marketing ? "sim" : "nao",
+      ((r.cashback_cents ?? 0) / 100).toFixed(2), r.points_balance ?? 0].map(esc).join(";"));
+    const blob = new Blob(["\ufeff" + [head.join(";"), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `clientes-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -194,57 +267,108 @@ export default function Clientes() {
   async function erase(c: Customer) {
     if (!confirm(`Excluir os dados pessoais de ${c.name} (pedido de exclusão LGPD)? Os valores dos pedidos ficam para fins fiscais, sem nome, telefone ou endereço. Esta ação não pode ser desfeita.`)) return;
     const { error } = await sb.rpc("anonymize_customer", { p_customer_id: c.id });
-    if (error) setErr(error.message); else load();
+    if (error) setErr(error.message); else void load(0);
   }
 
+  if (!manager) return <Empty>O CRM de clientes é usado pelo dono e pela gerência.</Empty>;
+  const s = res?.summary;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="h1">Clientes <span className="text-base font-normal text-zinc-500">({rows.length})</span></h1>
-        <button className="btn-secondary" onClick={exportCsv} disabled={!filtered.length}>Exportar CSV</button>
+        <div>
+          <h1 className="h1">Clientes <span className="text-base font-normal text-zinc-500">({res?.total ?? "…"})</span></h1>
+          <p className="mt-1 text-sm text-zinc-600">Combine filtros para achar o público certo, salve o filtro e use em campanhas.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secondary" onClick={exportCsv} disabled={!res?.total}>Exportar CSV</button>
+          <button className="btn-primary" onClick={campaign} disabled={!res?.total}>Criar campanha</button>
+        </div>
       </div>
+
+      {!!opts?.segments.length && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="font-medium text-zinc-500">Filtros salvos:</span>
+          {opts.segments.map((x) => (
+            <button key={x.id} onClick={() => applySaved(x.id)}
+              className={`rounded-full px-2.5 py-1 font-medium ring-1 ${current === x.id ? "bg-zinc-900 text-white ring-zinc-900" : "bg-white text-zinc-700 ring-zinc-200 hover:bg-zinc-50"}`}>{x.name}</button>
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        <input className="input max-w-xs" placeholder="Buscar por nome ou telefone" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar clientes" />
-        <select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value as keyof typeof SORTS)} aria-label="Ordenar">
-          {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        <input className="input max-w-xs" placeholder="Buscar por nome, telefone ou e-mail" value={f.q ?? ""} onChange={(e) => patch({ q: e.target.value || undefined })} aria-label="Buscar clientes" />
+        <select className="input w-auto" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar">
+          {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <button className={`btn-secondary ${open ? "ring-2 ring-brand-200" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open}>
+          Filtros avançados{n ? ` (${n})` : ""}
+        </button>
+        {n > 0 && <button className="btn-ghost text-sm" onClick={clear}>Limpar</button>}
+        {n > 0 && <button className="btn-ghost text-sm" onClick={saveFilter}>{current ? "Atualizar filtro salvo" : "Salvar filtro"}</button>}
+        {current && <button className="btn-ghost text-sm text-red-600" onClick={deleteFilter}>Apagar filtro salvo</button>}
       </div>
+      {open && <FilterPanel key={ver} f={f} set={patch} options={opts} />}
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">{chips.map((c) => <span key={c} className="badge bg-brand-50 text-brand-800 ring-1 ring-brand-100">{c}</span>)}</div>
+      )}
       <Alert>{err}</Alert>
-      {filtered.length === 0 ? <Empty>Os clientes aparecem aqui automaticamente a cada pedido.</Empty> : (
+      <Alert kind="success">{msg}</Alert>
+
+      {s && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[["Clientes no filtro", String(res!.total)], ["Gasto total", brl(s.spent_cents)],
+            ["Ticket médio", s.orders ? brl(Math.round(s.spent_cents / s.orders)) : "—"], ["Autorizaram marketing", String(s.opted_in)]].map(([l, v]) => (
+            <div key={l} className="rounded-xl bg-white p-3 ring-1 ring-zinc-200"><p className="text-xs text-zinc-500">{l}</p><p className="text-lg font-bold tabular-nums">{v}</p></div>
+          ))}
+        </div>
+      )}
+
+      {!!res?.total && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-zinc-600">Etiquetar os {res.total} cliente(s) do filtro:</span>
+          <input className="input w-48" placeholder="Ex.: vip" maxLength={30} value={tag} onChange={(e) => setTag(e.target.value)} aria-label="Etiqueta" list="crm-tags" />
+          <datalist id="crm-tags">{opts?.tags.map((t) => <option key={t} value={t} />)}</datalist>
+          <button className="btn-secondary" disabled={!tag.trim()} onClick={() => bulkTag(true)}>Adicionar</button>
+          <button className="btn-ghost" disabled={!tag.trim()} onClick={() => bulkTag(false)}>Remover</button>
+        </div>
+      )}
+
+      {res && rows.length === 0 ? <Empty>{n || f.q ? "Nenhum cliente com esses filtros." : "Os clientes aparecem aqui automaticamente a cada pedido."}</Empty> : (
         <div className="overflow-x-auto rounded-lg border border-zinc-200/70 bg-white shadow-soft">
           <table className="w-full text-sm">
             <thead className="bg-zinc-50/80 text-left text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-              <tr><th className="p-3">Cliente</th><th className="p-3">Segmento</th><th className="p-3">Pedidos</th><th className="p-3">Total gasto</th><th className="p-3">Ticket médio</th><th className="p-3">Cashback</th><th className="p-3">Pontos</th><th className="p-3">Último pedido</th><th className="p-3">Marketing</th><th /></tr>
+              <tr><th className="p-3">Cliente</th><th className="p-3">Segmento</th><th className="p-3">Pedidos</th><th className="p-3">Total gasto</th><th className="p-3">Ticket médio</th><th className="p-3">Cashback</th><th className="p-3">Último pedido</th><th className="p-3">Marketing</th><th /></tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {filtered.map((c) => {
-                const s = segment(c);
+              {rows.map((c) => {
+                const sg = SEGMENTS.find((x) => x[0] === c.segment);
                 return (
                   <tr key={c.id}>
                     <td className="p-3">
                       <p className="font-medium">{c.name}</p>
                       <a className="text-xs text-brand-700 hover:underline" href={`https://wa.me/55${c.phone}`} target="_blank" rel="noopener noreferrer">{formatPhone(c.phone)}</a>
+                      {!!c.tags?.length && <div className="mt-1 flex flex-wrap gap-1">{c.tags.map((t) => <span key={t} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700">{t}</span>)}</div>}
                     </td>
-                    <td className="p-3"><span className={`badge ${s.cls}`}>{s.label}</span></td>
+                    <td className="p-3">{sg && <span className={`badge ${sg[2]}`}>{sg[1]}</span>}</td>
                     <td className="p-3 tabular-nums">{c.orders_count}</td>
                     <td className="p-3 tabular-nums">{brl(c.total_spent_cents)}</td>
                     <td className="p-3 tabular-nums">{c.orders_count ? brl(Math.round(c.total_spent_cents / c.orders_count)) : "—"}</td>
                     <td className="p-3 tabular-nums">{c.cashback_cents ? brl(c.cashback_cents) : "—"}</td>
-                    <td className="p-3 tabular-nums">{c.points_balance || "—"}</td>
                     <td className="p-3 text-xs">{c.last_order_at ? new Date(c.last_order_at).toLocaleDateString("pt-BR") : "—"}</td>
                     <td className="p-3 text-xs">
-                      {c.opt_in_marketing ? <span className="badge bg-green-100 text-green-800">Autorizou marketing</span>
+                      {c.opt_in_marketing && !c.marketing_opt_out_at ? <span className="badge bg-green-100 text-green-800">Autorizou</span>
                         : c.marketing_opt_out_at ? <span className="badge bg-red-50 text-red-700">Descadastrado</span>
                         : <span className="badge bg-zinc-100 text-zinc-600">Não autorizou</span>}
                     </td>
                     <td className="whitespace-nowrap p-3 text-right">
+                      <button className="btn-ghost text-xs" onClick={() => setTagsOf(c)}>Etiquetas</button>
                       <button className="btn-ghost text-xs" onClick={() => setLoyalty(c)}>Fidelidade</button>
-                      {c.opt_in_marketing && role !== "cashier" && <button className="btn-ghost text-xs" onClick={async () => {
+                      {c.opt_in_marketing && !c.marketing_opt_out_at && <button className="btn-ghost text-xs" onClick={async () => {
                         if (!confirm(`Descadastrar ${c.name} do marketing? Ele não receberá mais campanhas.`)) return;
                         const { error } = await sb.rpc("customer_marketing_opt_out", { p_customer_id: c.id });
-                        if (error) setErr(error.message); else load();
-                      }}>Descadastrar do marketing</button>}
-                      {(role === "owner" || role === "manager") && <button className="btn-ghost text-xs text-red-600" onClick={() => erase(c)}>Excluir dados</button>}
+                        if (error) setErr(error.message); else void load(0);
+                      }}>Descadastrar</button>}
+                      <button className="btn-ghost text-xs text-red-600" onClick={() => erase(c)}>Excluir dados</button>
                     </td>
                   </tr>
                 );
@@ -253,8 +377,12 @@ export default function Clientes() {
           </table>
         </div>
       )}
-      {loyalty && <LoyaltyModal customer={loyalty} canAdjust={role === "owner" || role === "manager"} onClose={() => setLoyalty(null)} onChanged={load} />}
-      <p className="text-xs text-zinc-500">Só envie campanhas de marketing para clientes que aceitaram (coluna Marketing), conforme a LGPD.</p>
+      {res && rows.length < res.total && (
+        <div className="text-center"><button className="btn-secondary" disabled={loading} onClick={() => load(rows.length)}>{loading ? "Carregando..." : `Mostrar mais (${res.total - rows.length})`}</button></div>
+      )}
+      {loyalty && <LoyaltyModal customer={loyalty} canAdjust={manager} onClose={() => setLoyalty(null)} onChanged={() => void load(0)} />}
+      {tagsOf && <TagsModal c={tagsOf} onClose={() => setTagsOf(null)} onSaved={() => { void load(0); void loadOpts(); }} />}
+      <p className="text-xs text-zinc-500">Campanhas só vão para quem autorizou marketing (LGPD), mesmo que o filtro inclua outros clientes.</p>
     </div>
   );
 }

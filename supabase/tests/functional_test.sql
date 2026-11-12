@@ -1559,3 +1559,79 @@ do $$ declare j jsonb; m bigint := current_setting('test.wm')::bigint; begin
 end $$;
 reset role;
 select 'PDV WHATSAPP OK' as resultado;
+
+-- =====================================================================
+-- CRM COM FILTROS AVANÇADOS
+-- =====================================================================
+do $$ declare t uuid := current_setting('test.wt')::uuid; u uuid := current_setting('test.funit')::uuid; a uuid; b uuid; o uuid; pid uuid := current_setting('test.pid')::uuid;
+begin
+  insert into public.customers (tenant_id, name, phone, opt_in_marketing, orders_count, total_spent_cents, first_order_at, last_order_at, birthday, cashback_cents)
+  values (t, 'CRM Fiel', '31955550001', true, 8, 64000, now() - interval '200 days', now() - interval '3 days', (now() at time zone 'America/Sao_Paulo')::date - interval '30 years', 1500) returning id into a;
+  insert into public.customers (tenant_id, name, phone, opt_in_marketing, orders_count, total_spent_cents, first_order_at, last_order_at)
+  values (t, 'CRM Sumido', '31955550002', false, 2, 9000, now() - interval '120 days', now() - interval '90 days') returning id into b;
+  perform set_config('test.crm_a', a::text, false); perform set_config('test.crm_b', b::text, false);
+  -- pedido do Sumido por WhatsApp, no bairro Lourdes, com o produto de teste
+  insert into public.orders (tenant_id, unit_id, number, channel, type, status, customer_id, customer_name, customer_phone, address,
+    subtotal_cents, total_cents, payment_method, payment_status, created_at)
+  values (t, u, 99001, 'whatsapp', 'delivery', 'completed', b, 'CRM Sumido', '31955550002', '{"neighborhood":"Lourdes"}', 4500, 4500, 'cash', 'paid', now() - interval '90 days')
+  returning id into o;
+  insert into public.order_items (tenant_id, order_id, product_id, name, quantity, unit_price_cents, total_cents)
+  values (t, o, pid, 'Produto', 1, 4500, 4500);
+end $$;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.wt')::uuid; r jsonb; ids text[]; sid uuid;
+  a text := current_setting('test.crm_a'); b text := current_setting('test.crm_b');
+  fn_ids text := ''; begin
+  -- segmento + gasto
+  r := public.crm_search(t, '{"segments":["loyal"],"spent_min":50000}');
+  select array_agg(x->>'id') into ids from jsonb_array_elements(r->'rows') x;
+  if not (a = any (ids)) or b = any (coalesce(ids, '{}')) then raise exception 'FALHA fiel %', r; end if;
+  -- sumido há 60+ dias, canal WhatsApp, bairro e produto
+  r := public.crm_search(t, jsonb_build_object('inactive_days', 60, 'channels', jsonb_build_array('whatsapp'), 'neighborhoods', jsonb_build_array('lourdes'),
+    'products', jsonb_build_array(current_setting('test.pid'))));
+  select array_agg(x->>'id') into ids from jsonb_array_elements(r->'rows') x;
+  if (r->>'total')::int <> 1 or ids[1] <> b then raise exception 'FALHA pedidos %', r; end if;
+  -- período: só pedidos dos últimos 30 dias não pega o Sumido
+  r := public.crm_search(t, '{"channels":["whatsapp"],"neighborhoods":["Lourdes"],"period_days":30}');
+  if exists (select 1 from jsonb_array_elements(r->'rows') x where x->>'id' = b) then raise exception 'FALHA período'; end if;
+  -- aniversário de hoje, marketing, ticket, busca
+  if not exists (select 1 from jsonb_array_elements(public.crm_search(t, '{"birthday":"today","marketing":"opt_in"}')->'rows') x where x->>'id' = a) then raise exception 'FALHA aniversário'; end if;
+  if exists (select 1 from jsonb_array_elements(public.crm_search(t, '{"ticket_min":10000}')->'rows') x where x->>'id' = b) then raise exception 'FALHA ticket'; end if;
+  if (public.crm_search(t, '{"q":"5555000"}')->>'total')::int <> 2 then raise exception 'FALHA busca'; end if;
+  r := public.crm_search(t, '{"q":"CRM "}', 'spent', 1, 0);
+  if jsonb_array_length(r->'rows') <> 1 or r->'rows'->0->>'id' <> a or (r->>'total')::int <> 2 then raise exception 'FALHA ordem/paginação %', r; end if;
+  -- etiquetas
+  if public.crm_bulk_tag(t, '{"q":"CRM "}', '  VIP  Centro ') <> 2 then raise exception 'FALHA etiqueta em massa'; end if;
+  if (public.crm_search(t, '{"tags":["vip centro"]}')->>'total')::int <> 2 then raise exception 'FALHA filtro etiqueta'; end if;
+  if public.crm_bulk_tag(t, '{"segments":["inactive"],"q":"CRM"}', 'vip centro', false) <> 1 then raise exception 'FALHA tirar etiqueta'; end if;
+  if public.crm_set_tags(a::uuid, array['Fiel', 'fiel', '', 'Bairro Savassi']) <> array['bairro savassi', 'fiel'] then raise exception 'FALHA set tags'; end if;
+  -- filtro salvo vira público de campanha (só quem autorizou marketing)
+  sid := public.crm_segment_save(t, 'Fiéis do CRM', '{"q":"CRM","segments":["loyal","inactive"]}');
+  if (select filter ? 'q' from public.crm_segments where id = sid) then raise exception 'FALHA salvar sem busca'; end if;
+  begin perform public.crm_segment_save(t, '  ', '{}'); raise exception 'FALHA nome vazio'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if jsonb_array_length(public.crm_options(t)->'segments') < 1 then raise exception 'FALHA opções'; end if;
+  if (public.campaign_audience_count(t, jsonb_build_object('type', 'crm', 'filter', '{"tags":["fiel"]}'::jsonb))->>'eligible')::int <> 1 then
+    raise exception 'FALHA público campanha'; end if;
+  if (public.campaign_audience_count(t, jsonb_build_object('type', 'crm', 'filter', '{"segments":["inactive"],"q":"CRM"}'::jsonb))->>'eligible')::int <> 0 then
+    raise exception 'FALHA público sem opt-in'; end if;
+  perform public.crm_segment_delete(sid);
+end $$;
+-- cozinha e caixa não usam o CRM
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.crm_search(current_setting('test.wt')::uuid, '{}'); raise exception 'FALHA cozinha CRM'; exception when insufficient_privilege then null; end;
+  begin perform public.crm_set_tags(current_setting('test.crm_a')::uuid, array['x']); raise exception 'FALHA cozinha tags'; exception when insufficient_privilege then null; end;
+end $$;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  begin perform public.crm_bulk_tag(current_setting('test.wt')::uuid, '{}', 'x'); raise exception 'FALHA outra conta'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  begin perform public.crm_search(current_setting('test.wt')::uuid, '{}'); raise exception 'FALHA anon'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'CRM OK' as resultado;
