@@ -310,3 +310,17 @@ Configuração em **Painel › Integrações › Gestão** (dono e gerência, po
   - No produto, a seção **Preço e disponibilidade por loja** troca o preço ou tira o item de uma loja (`product_unit_overrides`). Preço vazio usa o padrão da rede.
   - Só quem tem acesso à loja altera o preço dela.
 - O seletor de loja no topo do menu troca a loja do painel, e a equipe pode ser restrita a lojas específicas (Equipe).
+
+## App do cliente instalável (PWA)
+
+O cardápio de cada loja funciona como app, sem loja de aplicativos e sem nada para configurar:
+
+- **Instalar na tela do celular**: cada loja tem manifesto próprio (`/loja/<slug>/manifest.webmanifest`) com nome, cor e ícone da loja (`/loja/<slug>/app-icon/<180|192|512>`, gerado a partir do logo PNG/JPEG/WebP ou da inicial). No Android/Chrome aparece o botão "Instalar"; no iPhone, a instrução "Compartilhar › Adicionar à Tela de Início". No domínio próprio, o app abre em `/`.
+- **Avisos no aparelho (Web Push)**: na página do pedido, "Receber avisos neste aparelho". A cada etapa (pagamento confirmado, aceito, pronto para retirar, saiu para entrega, concluído, cancelado) o banco enfileira o aviso (`push_queue`) e chama a função `push`, que cifra a mensagem (RFC 8291) e assina com VAPID (RFC 8292). A criptografia é própria e foi conferida contra o vetor de teste da RFC 8291. As chaves VAPID são geradas na primeira chamada e ficam no Vault. Assinaturas canceladas pelo navegador (404/410) são apagadas. O cron `domma-push` (a cada 2 min) reenvia o que falhou e limpa os dados antigos.
+- **Endpoints aceitos**: só serviços de push conhecidos (Google/FCM, Mozilla, Apple, Microsoft), validados no banco e na função, para o servidor não ser usado para chamar qualquer URL.
+- **iPhone**: o Web Push funciona com o app instalado na tela de início (iOS 16.4 ou mais novo); no Safari aberto, a página do pedido explica como instalar.
+- **Seus pedidos / Pedir de novo**: os pedidos feitos no aparelho ficam guardados nele (só o token do pedido). O cardápio mostra os últimos pedidos (`my_orders`): os abertos com "Acompanhar" e os encerrados com "Pedir de novo". A sacola é remontada com os preços e opções de hoje, e o que saiu do cardápio fica de fora com aviso.
+- **Sem internet**: o service worker (`/sw.js`) mostra uma página simples nas telas do cardápio e do pedido. O painel não passa por ele.
+- **Painel**: o card "App do cliente" em Configurações mostra os pedidos com avisos, os aparelhos e os avisos entregues ou com falha nos últimos 30 dias.
+
+Não há login por telefone: o cliente é reconhecido pelo aparelho (tokens dos pedidos e o cadastro salvo no checkout), sem custo de SMS.

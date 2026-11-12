@@ -1,5 +1,6 @@
 "use client";
 import { DomainCard } from "./domain";
+import { CustomerAppCard } from "./app";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
@@ -262,6 +263,7 @@ export default function Configuracoes() {
       )}
     </form>
     {canManage(role) && <DomainCard />}
+    {canManage(role) && <CustomerAppCard />}
     </div>
   );
 }
