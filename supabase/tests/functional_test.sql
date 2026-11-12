@@ -1635,3 +1635,89 @@ do $$ begin
 end $$;
 reset role;
 select 'CRM OK' as resultado;
+
+-- =====================================================================
+-- LOGÍSTICA (Foody Delivery / Entrega iFood)
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare u uuid := current_setting('test.funit')::uuid; o jsonb; begin
+  begin perform public.logistics_save(u, '{"foody_enabled":true}'); raise exception 'FALHA ligar sem credencial'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.logistics_save(u, '{"foody_base_url":"http://inseguro.com"}'); raise exception 'FALHA http'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.logistics_save(u, '{"ifood_enabled":true}'); raise exception 'FALHA ifood sem conexão'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.logistics_save(u, '{"foody_base_url":"https://api.foody.test/od/","foody_client_id":"cli-1","foody_client_secret":"seg-1","foody_enabled":true}');
+  o := public.logistics_overview(u);
+  if o->'foody'->>'base_url' <> 'https://api.foody.test/od' or not (o->'foody'->>'has_secret')::boolean or o::text like '%seg-1%' then raise exception 'FALHA overview %', o; end if;
+  perform set_config('test.lhook', o->'foody'->>'hook_token', false);
+end $$;
+-- caixa vê o resumo (sem token do webhook), não configura; cozinha nada
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ declare o jsonb; begin
+  o := public.logistics_overview(current_setting('test.funit')::uuid);
+  if o->'foody'->>'hook_token' is not null then raise exception 'FALHA caixa viu hook'; end if;
+  begin perform public.logistics_save(current_setting('test.funit')::uuid, '{"foody_enabled":false}'); raise exception 'FALHA caixa salvou'; exception when insufficient_privilege then null; end;
+end $$;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.logistics_overview(current_setting('test.funit')::uuid); raise exception 'FALHA cozinha'; exception when insufficient_privilege then null; end;
+  if public.logistics_can((select id from public.orders where unit_id = current_setting('test.funit')::uuid limit 1)) then raise exception 'FALHA cozinha can'; end if;
+end $$;
+reset role;
+-- pedido de entrega para chamar o entregador
+do $$ declare t uuid := current_setting('test.wt')::uuid; u uuid := current_setting('test.funit')::uuid; o uuid; begin
+  insert into public.orders (tenant_id, unit_id, number, channel, type, status, customer_name, customer_phone, address,
+    subtotal_cents, delivery_fee_cents, total_cents, payment_method, payment_status, change_for_cents)
+  values (t, u, 99101, 'web', 'delivery', 'preparing', 'Cliente Log', '31988887777', '{"street":"Rua A","number":"10","neighborhood":"Centro","city":"BH","lat":-19.9,"lng":-43.9}',
+    4000, 700, 4700, 'cash', 'pending', 5000) returning id into o;
+  perform set_config('test.lorder', o::text, false);
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare c jsonb; d uuid; o uuid := current_setting('test.lorder')::uuid; h jsonb; begin
+  c := public.logistics_order_context(o);
+  if c->'foody'->>'client_secret' <> 'seg-1' or c->'order'->>'type' <> 'delivery' or jsonb_array_length(c->'items') <> 0 or c->'ifood' <> 'null'::jsonb then raise exception 'FALHA contexto %', c; end if;
+  h := public.logistics_hook_context(current_setting('test.lhook'));
+  if h->>'client_secret' <> 'seg-1' then raise exception 'FALHA hook'; end if;
+  if public.logistics_hook_context('abc') is not null then raise exception 'FALHA hook inválido'; end if;
+  d := public.logistics_record(o, 'foody', 'DLV-1', 'pending', 900, now() + interval '30 minutes', null, null);
+  begin perform public.logistics_record(o, 'ifood', 'X-2', 'pending', 0, null, null, null); raise exception 'FALHA duas solicitações'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if public.logistics_event('foody', 'nao-existe', 'ACCEPTED') then raise exception 'FALHA evento órfão'; end if;
+  perform public.logistics_event('foody', 'DLV-1', 'ACCEPTED', '{"deliveryPerson":{"id":"1","name":"Rafa","phone":"31999990000"},"vehicle":{"type":"MOTORBIKE_BAG"}}');
+  perform public.logistics_event('foody', 'DLV-1', 'ORDER_PICKED', '{}');
+  if (select status from public.orders where id = o) <> 'dispatched' then raise exception 'FALHA despachado'; end if;
+  perform public.logistics_event('foody', 'DLV-1', 'PICKUP_ONGOING', '{}');    -- fora de ordem: não volta
+  if (select status from public.external_deliveries where id = d) <> 'picked' then raise exception 'FALHA ordem'; end if;
+  perform public.logistics_event('foody', 'DLV-1', 'ORDER_DELIVERED', '{"deliveryPrice":{"price":{"value":9.5,"currency":"BRL"}}}');
+  if (select status from public.orders where id = o) <> 'completed' then raise exception 'FALHA concluído'; end if;
+  if (select courier->>'name' from public.external_deliveries where id = d) <> 'Rafa' or (select fee_cents from public.external_deliveries where id = d) <> 950 then raise exception 'FALHA dados'; end if;
+  perform public.logistics_event('foody', 'DLV-1', 'CANCELLED', '{}');          -- depois de entregue não cancela
+  if (select status from public.external_deliveries where id = d) <> 'delivered' then raise exception 'FALHA cancelou entregue'; end if;
+  -- iFood: falha libera nova solicitação
+  update public.orders set status = 'preparing' where id = o;
+  update public.external_deliveries set status = 'cancelled' where id = d;
+  d := public.logistics_record(o, 'ifood', 'IFD-9', 'pending', 0, null, 'https://track', null);
+  perform public.logistics_event('ifood', 'IFD-9', 'REQUEST_DRIVER_FAILED', '{"message":"Sem entregadores"}');
+  if (select status || '|' || error from public.external_deliveries where id = d) <> 'failed|Sem entregadores' then raise exception 'FALHA falha ifood'; end if;
+  perform public.logistics_record(o, 'ifood', 'IFD-10', 'pending', 0, null, null, null);
+  perform public.logistics_event('ifood', 'IFD-10', 'DELIVERY_DROP_CODE_REQUESTED', '{"CODE":"7777"}');
+  if (select drop_code from public.external_deliveries where external_id = 'IFD-10') <> '7777' then raise exception 'FALHA código'; end if;
+end $$;
+reset role;
+set request.jwt.claims = '{}';
+set role anon;
+do $$ begin
+  begin perform public.logistics_event('foody', 'DLV-1', 'CANCELLED'); raise exception 'FALHA anon evento'; exception when insufficient_privilege then null; end;
+  begin perform public.logistics_order_context(current_setting('test.lorder')::uuid); raise exception 'FALHA anon contexto'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ begin
+  begin perform public.logistics_order_context(current_setting('test.lorder')::uuid); raise exception 'FALHA dono contexto'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if (select count(*) from public.external_deliveries where order_id = current_setting('test.lorder')::uuid) <> 3 then raise exception 'FALHA dono vê entregas'; end if;
+  if not public.logistics_can(current_setting('test.lorder')::uuid) then raise exception 'FALHA dono can'; end if;
+end $$;
+reset role;
+select 'LOGISTICA OK' as resultado;

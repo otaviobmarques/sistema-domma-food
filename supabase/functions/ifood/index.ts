@@ -5,6 +5,9 @@
 //   POST /ifood/status           {unit_id}                     → status da loja no iFood
 //   POST /ifood/test                                           → valida o app (super admin)
 //   POST /ifood/worker           {job: all|poll|outbox}        → polling de eventos + fila de status (x-worker-secret)
+//   POST /ifood/shipping/quote   {order_id, address?}          → Entrega iFood: cotação para pedido de fora do iFood (equipe)
+//   POST /ifood/shipping/request {order_id, quote_id, address?} → Entrega iFood: cadastra o pedido e aloca entregador
+//   POST /ifood/shipping/cancel  {order_id}                     → Entrega iFood: cancela
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 
 const API = "https://merchant-api.ifood.com.br";
@@ -169,6 +172,115 @@ async function test(req: Request) {
   return json({ ok, message });
 }
 
+// ---------------- Entrega iFood (Shipping API, pedidos de fora do iFood) ----------------
+type ShipCtx = {
+  order: { id: string; number: number; type: string; status: string; customer_name: string; customer_phone: string; address: Record<string, unknown> | null;
+    delivery_fee_cents: number; total_cents: number; payment_method: string; payment_status: string; change_for_cents: number | null };
+  items: { id: string; name: string; quantity: number; unit_price_cents: number; total_cents: number }[];
+  unit: { id: string; state: string | null; prep_time_min: number };
+  ifood: { connection_id: string; merchant_id: string } | null;
+  active: { id: string; provider: string; external_id: string; status: string } | null;
+};
+const dig = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+async function shipLoad(req: Request) {
+  const b = await req.json().catch(() => ({}));
+  if (typeof b.order_id !== "string" || !UUID.test(b.order_id)) return { error: json({ error: "Pedido inválido" }, 400) };
+  const { data: can } = await userClient(req).rpc("logistics_can", { p_order_id: b.order_id });
+  if (can !== true) return { error: json({ error: "Sem permissão para este pedido." }, 403) };
+  const { data } = await admin.rpc("logistics_order_context", { p_order_id: b.order_id });
+  const c = data as ShipCtx | null;
+  if (!c) return { error: json({ error: "Pedido não encontrado." }, 404) };
+  if (!c.ifood) return { error: json({ error: "A Entrega iFood não está ligada nesta loja (Integrações › Logística)." }, 409) };
+  if (c.order.type !== "delivery") return { error: json({ error: "Só pedidos de entrega podem chamar entregador." }, 409) };
+  if (["cancelled", "completed", "awaiting_payment"].includes(c.order.status)) return { error: json({ error: "Este pedido não está em andamento." }, 409) };
+  const a = c.order.address ?? {};
+  const lat = Number.isFinite(b.address?.lat) ? Number(b.address.lat) : typeof a.lat === "number" ? a.lat : null;
+  const lng = Number.isFinite(b.address?.lng) ? Number(b.address.lng) : typeof a.lng === "number" ? a.lng : null;
+  const cep = dig(b.address?.postal_code ?? a.postal_code ?? a.zip ?? "");
+  if (lat == null || lng == null || Math.abs(lat) > 90 || Math.abs(lng) > 180)
+    return { error: json({ error: "A Entrega iFood precisa da localização do cliente. Informe latitude e longitude (ou peça a localização pelo WhatsApp)." }, 422) };
+  const { data: ctx } = await admin.rpc("ifood_auth_context", { p_connection_id: c.ifood.connection_id });
+  if (!ctx?.token) return { error: json({ error: "A autorização do iFood desta loja expirou. Conecte de novo em Integrações › iFood." }, 409) };
+  const { data: { user } } = await userClient(req).auth.getUser();
+  return { b, c, lat, lng, cep, conn: { id: c.ifood.connection_id, token: ctx.token as Token }, uid: user?.id ?? null };
+}
+const reais = (cents: number) => Math.round(cents) / 100;
+
+async function shipQuote(req: Request) {
+  const g = await shipLoad(req); if (g.error) return g.error;
+  const r = await api(g.conn, "GET", `/shipping/v1.0/merchants/${encodeURIComponent(g.c.ifood!.merchant_id)}/deliveryAvailabilities?latitude=${g.lat}&longitude=${g.lng}`);
+  if (r.http !== 200) {
+    const code = (r.data as { code?: string } | null)?.code ?? "";
+    const human: Record<string, string> = {
+      DeliveryDistanceTooHigh: "Endereço longe demais para a Entrega iFood.", OffOpeningHours: "Fora do horário da Entrega iFood.",
+      ServiceAreaMismatch: "Endereço fora da área atendida pela Entrega iFood.", HighDemand: "Alta demanda: sem entregadores agora. Tente em alguns minutos.",
+      MerchantStatusAvailability: "A loja está indisponível no iFood agora.", OriginNotFound: "O iFood não encontrou o endereço da loja.",
+    };
+    return json({ error: human[code] ?? `O iFood não cotou a entrega (${errMsg(r)}). Confira se o serviço está contratado no Portal do Parceiro.` }, 502);
+  }
+  const q = r.data as { id: string; expirationAt?: string; distance?: number; quote?: { netValue?: number }; deliveryTime?: { min?: number; max?: number } };
+  return json({ ok: true, provider: "ifood", quote_id: q.id, expires_at: q.expirationAt ?? null, distance_m: q.distance ?? null,
+    price_cents: q.quote?.netValue != null ? Math.round(q.quote.netValue * 100) : null,
+    delivery_min: q.deliveryTime?.min != null ? Math.round(q.deliveryTime.min / 60) : null,
+    delivery_max: q.deliveryTime?.max != null ? Math.round(q.deliveryTime.max / 60) : null });
+}
+
+async function shipRequest(req: Request) {
+  const g = await shipLoad(req); if (g.error) return g.error;
+  if (g.c.active) return json({ error: "Já existe um entregador solicitado para este pedido." }, 409);
+  if (typeof g.b.quote_id !== "string" || !UUID.test(g.b.quote_id)) return json({ error: "Faça a cotação antes de chamar o entregador." }, 400);
+  if (!/^\d{8}$/.test(g.cep)) return json({ error: "Informe o CEP do cliente (8 dígitos): a Entrega iFood exige." }, 422);
+  const o = g.c.order, a = o.address ?? {};
+  const paid = o.payment_status === "paid" || o.payment_method === "online_card";
+  const method = ({ cash: "CASH", credit_card: "CREDIT", debit_card: "DEBIT", card_on_delivery: "CREDIT" } as Record<string, string>)[o.payment_method];
+  if (!paid && !method) return json({ error: "A Entrega iFood só leva pedidos já pagos ou pagos na entrega em dinheiro ou cartão." }, 422);
+  const phone = o.customer_phone.replace(/^55/, "");
+  const validPhone = /^\d{10,11}$/.test(phone) && !/^0+$/.test(phone);
+  const body = {
+    customer: { name: o.customer_name.slice(0, 50),
+      phone: validPhone ? { type: "CUSTOMER", countryCode: "55", areaCode: phone.slice(0, 2), number: phone.slice(2) } : { type: "STORE" } },
+    delivery: {
+      merchantFee: reais(o.delivery_fee_cents ?? 0), quoteId: g.b.quote_id, preparationTime: 0,
+      deliveryAddress: {
+        postalCode: g.cep, streetNumber: String(a.number ?? "S/N").slice(0, 10) || "S/N", streetName: String(a.street ?? "").slice(0, 50),
+        ...(a.complement ? { complement: String(a.complement).slice(0, 50) } : {}), ...(a.reference ? { reference: String(a.reference).slice(0, 70) } : {}),
+        neighborhood: String(a.neighborhood ?? "").slice(0, 50), city: String(a.city ?? "").slice(0, 50),
+        state: String(a.state ?? g.c.unit.state ?? "").slice(0, 2).toUpperCase(), country: "BR",
+        coordinates: { latitude: g.lat, longitude: g.lng } },
+    },
+    items: g.c.items.slice(0, 50).map((i) => ({ id: i.id, name: i.name.slice(0, 50), quantity: i.quantity, unitPrice: reais(i.unit_price_cents),
+      price: reais(i.unit_price_cents * i.quantity), optionsPrice: Math.max(0, reais(i.total_cents - i.unit_price_cents * i.quantity)), totalPrice: reais(i.total_cents) })),
+    ...(paid ? {} : { payments: { methods: [{ method, type: "OFFLINE", value: reais(o.total_cents),
+      ...(method === "CASH" ? { cash: { changeFor: reais(o.change_for_cents ?? o.total_cents) } } : { card: { brand: "OTHER" } }) }] } }),
+    displayId: String(o.number).slice(-4),
+    metadata: { domma: String(o.number).slice(0, 12) },
+  };
+  const r = await api(g.conn, "POST", `/shipping/v1.0/merchants/${encodeURIComponent(g.c.ifood!.merchant_id)}/orders`, { body });
+  if (r.http !== 202 && r.http !== 200) return json({ error: `O iFood recusou a entrega (${errMsg(r)}).` }, 502);
+  const d = r.data as { id?: string; trackingUrl?: string };
+  if (!d.id) return json({ error: "O iFood não devolveu o identificador da entrega." }, 502);
+  const { error } = await admin.rpc("logistics_record", { p_order_id: o.id, p_provider: "ifood", p_external_id: d.id, p_status: "pending",
+    p_fee_cents: null, p_eta: null, p_tracking_url: d.trackingUrl ?? null, p_actor: g.uid, p_error: null });
+  if (error) return json({ error: error.message }, 409);
+  return json({ ok: true, tracking_url: d.trackingUrl ?? null });
+}
+
+async function shipCancel(req: Request) {
+  const g = await shipLoad(req); if (g.error) return g.error;
+  const act = g.c.active;
+  if (!act || act.provider !== "ifood") return json({ error: "Não há Entrega iFood em andamento neste pedido." }, 409);
+  const ext = encodeURIComponent(act.external_id);
+  const rs = await api(g.conn, "GET", `/shipping/v1.0/orders/${ext}/cancellationReasons`);
+  if (rs.http === 204) return json({ error: "O iFood não permite cancelar esta entrega agora (o entregador já pode ter saído)." }, 409);
+  const reasons = (Array.isArray(rs.data) ? rs.data : []) as { cancelCodeId: string; description: string }[];
+  const pick = reasons.find((x) => /loja|restaurante|cliente desistiu|desist/i.test(x.description)) ?? reasons[0];
+  if (!pick) return json({ error: `Motivos de cancelamento indisponíveis (${errMsg(rs)}).` }, 502);
+  const r = await api(g.conn, "POST", `/shipping/v1.0/orders/${ext}/cancel`, { body: { reason: String(g.b.message ?? pick.description).slice(0, 250), cancellationCode: Number(pick.cancelCodeId) } });
+  if (r.http >= 300) return json({ error: `O iFood não cancelou (${errMsg(r)}).` }, 502);
+  await admin.rpc("logistics_event", { p_provider: "ifood", p_external_id: act.external_id, p_code: "CANCELLATION_REQUESTED", p_payload: { message: "Pedido pela loja" } });
+  return json({ ok: true });
+}
+
 // ---------------- Worker: eventos e fila ----------------
 type Ev = { id: string; code: string; fullCode?: string; orderId: string; merchantId?: string; createdAt?: string; metadata?: Record<string, unknown> };
 
@@ -181,6 +293,13 @@ async function handleEvent(c: Conn, ev: Ev) {
     if ((prev as { processed_at: string | null } | null)?.processed_at) return;   // já tratado: só confirma de novo
   }
   try {
+    // eventos da Entrega iFood (pedidos de fora do iFood) vão para a logística
+    const { data: handled } = await admin.rpc("logistics_event", { p_provider: "ifood", p_external_id: ev.orderId,
+      p_code: ev.fullCode ?? ev.code, p_payload: { ...(ev.metadata ?? {}), code: ev.code } });
+    if (handled === true) {
+      await admin.from("marketplace_events").update({ processed_at: new Date().toISOString(), error: null }).eq("connection_id", c.id).eq("event_id", ev.id);
+      return;
+    }
     if (ev.code === "PLC") {
       const r = await api(c, "GET", `/order/v1.0/orders/${encodeURIComponent(ev.orderId)}`);
       if (r.http !== 200) throw new Error(`Não foi possível obter o pedido ${ev.orderId} (${errMsg(r)})`);
@@ -297,6 +416,9 @@ Deno.serve(async (req) => {
     if (path === "/connect/merchant") return await connectMerchant(req);
     if (path === "/status") return await status(req);
     if (path === "/test") return await test(req);
+    if (path === "/shipping/quote") return await shipQuote(req);
+    if (path === "/shipping/request") return await shipRequest(req);
+    if (path === "/shipping/cancel") return await shipCancel(req);
     return json({ error: "Rota não encontrada" }, 404);
   } catch (e) {
     console.error(e);
