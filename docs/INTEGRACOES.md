@@ -153,7 +153,7 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 
 - **Painel › Totens:** o gestor cria um totem (por exemplo, "Totem da entrada") e recebe um link `/totem/<chave>` com QR Code.
   - A chave é guardada só como hash, então o link aparece uma vez; dá para gerar outro ou desativar o totem.
-  - Opções por totem: comer aqui, para levar, Pix na tela, pagar no caixa e aceitar automaticamente.
+  - Opções por totem: comer aqui, para levar, Pix na tela, pagar no caixa, cartão na maquininha e aceitar automaticamente.
   - O painel mostra se o totem está ligado agora (sinal a cada minuto).
 - **No aparelho (tablet ou tela touch):**
   - Fluxo: tela de início → comer aqui ou levar → cardápio por categoria → adicionais → revisão → nome → pagamento → número do pedido em destaque.
@@ -162,7 +162,25 @@ Os selos usam o nome e a cor de cada marketplace. Para usar o logotipo oficial (
 - **Pagamento:**
   - **Pix na tela:** usa o Mercado Pago configurado em Pagamento online. O pedido fica aguardando pagamento e entra na cozinha quando o Pix é confirmado.
   - **Pagar no caixa:** o pedido entra marcado "PAGAR NO CAIXA". Em Pedidos, o botão **Receber no caixa** (`order_receive`) registra a forma de pagamento e o troco no caixa aberto.
-  - Cartão direto no totem (TEF/maquininha integrada) ainda não é suportado. Nesse caso, o cliente paga no caixa.
+  - **Cartão na maquininha (Mercado Pago Point):** o cliente escolhe crédito ou débito no totem e a cobrança aparece sozinha na maquininha ao lado (modo integrado/PDV, Orders API do Mercado Pago).
+    - Ativação em Painel › Totens:
+      - ligue "Cartão na maquininha";
+      - clique em "Buscar maquininhas da conta" (rota `payments/terminals`, que usa o Access Token da loja);
+      - ative o modo integrado;
+      - clique em "Usar neste totem". O ID também pode ser digitado no formato `MODELO__SÉRIE`.
+    - No Mercado Pago, em Suas integrações › Webhooks, marque o evento **Order** no mesmo endereço do Pagamento online.
+    - O cartão só aparece no totem com o Mercado Pago configurado e uma maquininha vinculada.
+    - Fluxo:
+      - `totem_order` cria o pedido aguardando pagamento;
+      - `payments/point` cria a cobrança com chave de idempotência e expira em 3 minutos;
+      - uma cobrança aberta é reaproveitada;
+      - o totem consulta `payments/sync`, e o webhook `order` também confirma.
+    - Aprovado (`processed`): o pedido é marcado como pago e vai para a cozinha.
+    - Recusado, cancelado ou expirado:
+      - o totem mostra o motivo e oferece "Tentar de novo" ou "Pagar no caixa" (`totem_pay_at_counter`);
+      - "Desistir do cartão" cancela a cobrança na maquininha (`payments/point/cancel`).
+    - Estorno: pelo mesmo fluxo de estorno do Pagamento online (`/v1/orders/{id}/refund`).
+    - Teste com credenciais de teste: maquininha virtual `NEWLAND_N950__SBX0000001`.
 - **Proteções:** limite de 15 pedidos a cada 10 minutos por totem, teto de valor por pedido, loja fechada não aceita pedidos e totem desativado para na hora.
 
 ## Pixel do Meta, Google Analytics 4 e funil de conversão

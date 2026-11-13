@@ -7,16 +7,22 @@ import { ProductModal, Stepper } from "@/components/store/product-modal";
 import { storeColor } from "@/components/store/brand";
 import type { CartItem, Store, StoreProduct } from "@/components/store/types";
 import { OnlinePayment, type OrderGateway } from "@/app/pedido/[token]/online-payment";
+import { PointPayment } from "./point";
 
 export type TotemInfo = {
   slug: string; unit_name: string; totem: string; is_open: boolean;
-  allow_dine_in: boolean; allow_takeout: boolean; allow_counter: boolean; allow_pix: boolean;
+  allow_dine_in: boolean; allow_takeout: boolean; allow_counter: boolean; allow_pix: boolean; allow_card?: boolean;
 };
 type Step = "welcome" | "mode" | "menu" | "review" | "done";
 type Mode = "dine_in" | "pickup";
-type Placed = { number: number; token: string; status: string; total_cents: number; pay: "pix" | "counter" };
+type Pay = "pix" | "counter" | "credit_card" | "debit_card";
+type Placed = { number: number; token: string; status: string; total_cents: number; pay: Pay };
 type OrderView = { status: string; payment_status: string; payment_method: string; total_cents: number; gateway?: OrderGateway | null };
 
+const PAY_LABEL: Record<Pay, [string, string]> = {
+  credit_card: ["Cartão de crédito", "Na maquininha ao lado"], debit_card: ["Cartão de débito", "Na maquininha ao lado"],
+  pix: ["Pix aqui na tela", "Leia o QR Code com o app do banco"], counter: ["Pagar no caixa", "Dinheiro ou cartão, no balcão"],
+};
 const IDLE_MS = 75_000;      // sem toque: pergunta se ainda está aí
 const CONFIRM_S = 15;        // segundos para responder antes de recomeçar
 const DONE_MS = 30_000;      // tela final volta ao início
@@ -32,7 +38,8 @@ export function Kiosk({ token, info: initial, store }: { token: string; info: To
   const [cat, setCat] = useState<string>("");
   const [open, setOpen] = useState<StoreProduct | null>(null);
   const [name, setName] = useState("");
-  const [pay, setPay] = useState<"pix" | "counter" | null>(null);
+  const [pay, setPay] = useState<Pay | null>(null);
+  const [counterSwitched, setCounterSwitched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [placed, setPlaced] = useState<Placed | null>(null);
@@ -45,11 +52,11 @@ export function Kiosk({ token, info: initial, store }: { token: string; info: To
   const total = items.reduce((s, i) => s + i.unit_price_cents * i.quantity, 0);
   const count = items.reduce((s, i) => s + i.quantity, 0);
   const modes: Mode[] = [...(info.allow_dine_in ? ["dine_in" as const] : []), ...(info.allow_takeout ? ["pickup" as const] : [])];
-  const pays = [...(info.allow_pix ? ["pix" as const] : []), ...(info.allow_counter ? ["counter" as const] : [])];
+  const pays: Pay[] = [...(info.allow_card ? ["credit_card" as const, "debit_card" as const] : []), ...(info.allow_pix ? ["pix" as const] : []), ...(info.allow_counter ? ["counter" as const] : [])];
 
   const reset = useCallback(() => {
     setStep("welcome"); setMode(null); setItems([]); setOpen(null); setName(""); setPay(null);
-    setErr(""); setPlaced(null); setOrder(null); setIdleAsk(0); setCat(cats[0]?.id ?? "");
+    setErr(""); setPlaced(null); setOrder(null); setIdleAsk(0); setCat(cats[0]?.id ?? ""); setCounterSwitched(false);
     // aparelho compartilhado: não guardar dados do cliente anterior (e-mail do Pix etc.)
     try { localStorage.removeItem("df_payer_email"); sessionStorage.clear(); } catch { /* sem armazenamento */ }
     window.scrollTo(0, 0);
@@ -90,10 +97,11 @@ export function Kiosk({ token, info: initial, store }: { token: string; info: To
   useEffect(() => {
     if (step !== "done" || !placed) return;
     void loadOrder();
-    const poll = placed.pay === "pix" ? setInterval(loadOrder, 5000) : undefined;
+    const poll = placed.pay !== "counter" ? setInterval(loadOrder, 5000) : undefined;
     return () => { if (poll) clearInterval(poll); };
   }, [step, placed, loadOrder]);
-  const waitingPix = placed?.pay === "pix" && order?.payment_status !== "paid" && order?.status !== "cancelled";
+  const isCard = placed?.pay === "credit_card" || placed?.pay === "debit_card";
+  const waitingPix = (placed?.pay === "pix" || (isCard && !counterSwitched)) && order?.payment_status !== "paid" && order?.status !== "cancelled";
   useEffect(() => {
     if (step !== "done" || waitingPix) return;
     const t = setTimeout(reset, DONE_MS);
@@ -194,6 +202,23 @@ export function Kiosk({ token, info: initial, store }: { token: string; info: To
             <p className="mt-4 text-center text-sm text-zinc-500">Prefere pagar no caixa? Informe o número #{placed.number} ao atendente.</p>
           </div>
         )}
+        {isCard && !counterSwitched && waitingPix && (
+          <PointPayment orderToken={placed.token} totalCents={placed.total_cents} cardType={placed.pay as "credit_card" | "debit_card"} color={color}
+            canCounter={info.allow_counter} onPaid={() => void loadOrder()}
+            onCounter={async () => {
+              const { error } = await sb.rpc("totem_pay_at_counter", { p_token: token, p_order_token: placed.token });
+              if (error) return errorMessage(error);
+              setCounterSwitched(true); void loadOrder(); return null;
+            }} />
+        )}
+        {isCard && counterSwitched && (
+          <p className="text-2xl text-zinc-700">Vá ao <b>caixa</b> para pagar <b>{brl(placed.total_cents)}</b> e informe o número.
+            {mode === "dine_in" ? " Chamaremos quando estiver pronto." : " Retire no balcão quando chamarmos."}</p>
+        )}
+        {isCard && order?.payment_status === "paid" && (
+          <p className="text-2xl font-semibold text-emerald-700">Pagamento aprovado! {mode === "dine_in" ? "Chamaremos quando estiver pronto." : "Retire no balcão quando chamarmos."}</p>
+        )}
+        {isCard && order?.status === "cancelled" && <p className="text-2xl text-red-700">O pedido expirou sem pagamento. Faça o pedido de novo ou chame um atendente.</p>}
         {placed.pay === "pix" && order?.payment_status === "paid" && (
           <p className="text-2xl font-semibold text-emerald-700">Pagamento aprovado! {mode === "dine_in" ? "Chamaremos quando estiver pronto." : "Retire no balcão quando chamarmos."}</p>
         )}
@@ -231,9 +256,8 @@ export function Kiosk({ token, info: initial, store }: { token: string; info: To
           {pays.map((p) => (
             <button key={p} className={`rounded-2xl border-2 p-5 text-left text-xl font-bold ${pay === p ? "bg-zinc-900 text-white" : "bg-white"}`}
               style={{ borderColor: pay === p ? color : undefined }} onClick={() => setPay(p)} aria-pressed={pay === p}>
-              {p === "pix" ? "Pix aqui na tela" : "Pagar no caixa"}
-              <span className={`mt-1 block text-sm font-normal ${pay === p ? "text-zinc-200" : "text-zinc-500"}`}>
-                {p === "pix" ? "Leia o QR Code com o app do banco" : "Dinheiro ou cartão, no balcão"}</span>
+              {PAY_LABEL[p][0]}
+              <span className={`mt-1 block text-sm font-normal ${pay === p ? "text-zinc-200" : "text-zinc-500"}`}>{PAY_LABEL[p][1]}</span>
             </button>
           ))}
         </div>

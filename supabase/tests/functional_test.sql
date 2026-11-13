@@ -2340,3 +2340,100 @@ do $$ begin
 end $$;
 reset role;
 select 'API EXTRA OK' as resultado;
+
+-- =====================================================================
+-- TOTEM: CARTÃO NA MAQUININHA (MERCADO PAGO POINT)
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare r jsonb; u uuid := (select id from public.units where slug = 'bella-massa'); begin
+  r := public.totem_create(u, 'Totem cartão');
+  perform set_config('test.pt', r->>'token', false);
+  perform set_config('test.ptid', r->>'id', false);
+  begin perform public.totem_update((r->>'id')::uuid, '{"allow_card":true}'); raise exception 'FALHA cartão sem maquininha';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.totem_update((r->>'id')::uuid, '{"allow_card":true,"point_terminal_id":"maquininha 1"}'); raise exception 'FALHA ID inválido';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.totem_update((r->>'id')::uuid, '{"allow_card":true,"point_terminal_id":"newland_n950__sbx0000001"}');
+  if (select point_terminal_id from public.totems where id = (r->>'id')::uuid) <> 'NEWLAND_N950__SBX0000001' then raise exception 'FALHA ID normalizado'; end if;
+  -- só cartão (sem caixa e sem Pix) é permitido quando há maquininha
+  perform public.totem_update((r->>'id')::uuid, '{"allow_pix":false,"allow_counter":false}');
+  perform public.totem_update((r->>'id')::uuid, '{"allow_counter":true}');
+end $$;
+reset role;
+set role anon;
+do $$ declare i jsonb; r jsonb; it jsonb := jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1)); begin
+  i := public.totem_info(current_setting('test.pt'));
+  if (i->>'allow_card')::boolean is not true then raise exception 'FALHA totem_info cartão %', i; end if;
+  begin perform public.totem_order(current_setting('test.pt'), it, 'pickup', 'Caio', 'boleto'); raise exception 'FALHA forma inválida';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  r := public.totem_order(current_setting('test.pt'), it, 'pickup', 'Caio', 'credit_card');
+  if r->>'status' <> 'awaiting_payment' or r->>'pay' <> 'credit_card' then raise exception 'FALHA pedido cartão %', r; end if;
+  perform set_config('test.pord', r->>'token', false);
+  r := public.totem_order(current_setting('test.pt'), it, 'dine_in', 'Duda', 'debit_card');
+  perform set_config('test.pord2', r->>'token', false);
+  begin perform public.gateway_point_context(r->>'token'); raise exception 'FALHA anon contexto'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare c jsonb; gp uuid; st text; oid uuid; begin
+  c := public.gateway_point_context(current_setting('test.pord'));
+  if c->>'terminal_id' <> 'NEWLAND_N950__SBX0000001' or c->>'token' not like 'TEST-%' or (c->>'total_cents')::int <> 2990
+     or c->>'payment_method' <> 'credit_card' then raise exception 'FALHA contexto %', c; end if;
+  oid := (c->>'order_id')::uuid;
+  if (select method from public.payments where order_id = oid) <> 'credit_card' then raise exception 'FALHA payments'; end if;
+  -- recusado
+  gp := public.gateway_begin(oid, 'point', 2990);
+  st := public.gateway_record_point(gp, '{"id":"ORD0001","status":"failed","transactions":{"payments":[{"amount":"29.90","status":"failed","status_detail":"insufficient_amount"}]}}');
+  if st <> 'rejected' or (select status from public.orders where id = oid) <> 'awaiting_payment' then raise exception 'FALHA recusado %', st; end if;
+  -- valor diferente não confirma
+  gp := public.gateway_begin(oid, 'point', 2990);
+  st := public.gateway_record_point(gp, '{"id":"ORD0002","status":"processed","transactions":{"payments":[{"amount":"1.00","paid_amount":"1.00","status":"processed"}]}}');
+  if st <> 'error' then raise exception 'FALHA valor adulterado %', st; end if;
+  -- na maquininha, depois aprovado
+  gp := public.gateway_begin(oid, 'point', 2990);
+  st := public.gateway_record_point(gp, '{"id":"ORD0003","status":"at_terminal","transactions":{"payments":[{"amount":"29.90","status":"at_terminal"}]}}');
+  if st <> 'in_process' then raise exception 'FALHA at_terminal %', st; end if;
+  perform set_config('test.pgp', gp::text, false);
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  -- enquanto a maquininha processa, não troca para o caixa
+  begin perform public.totem_pay_at_counter(current_setting('test.pt'), current_setting('test.pord')); raise exception 'FALHA trocou durante processamento';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.totem_pay_at_counter('dft_' || repeat('0', 40), current_setting('test.pord')); raise exception 'FALHA outro totem';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare st text; gp uuid := current_setting('test.pgp')::uuid; oid uuid; begin
+  st := public.gateway_record_point(gp, '{"id":"ORD0003","status":"processed","transactions":{"payments":[{"amount":"29.90","paid_amount":"29.90","status":"processed","status_detail":"accredited","payment_method":{"id":"master","type":"credit_card","installments":1}}]}}');
+  select order_id into oid from public.gateway_payments where id = gp;
+  if st <> 'paid' or (select payment_status from public.orders where id = oid) <> 'paid' or (select status from public.orders where id = oid) not in ('pending','preparing')
+     or (select card_brand from public.gateway_payments where id = gp) <> 'master' then raise exception 'FALHA aprovado %', st; end if;
+  if not exists (select 1 from public.order_events where order_id = oid and note like '%maquininha%') then raise exception 'FALHA histórico'; end if;
+  -- webhook atrasado (at_terminal) não desfaz a aprovação
+  st := public.gateway_record_point(gp, '{"id":"ORD0003","status":"at_terminal","transactions":{"payments":[{"amount":"29.90"}]}}');
+  if (select status from public.gateway_payments where id = gp) <> 'approved' then raise exception 'FALHA voltou de aprovado'; end if;
+  -- estorno usa a API certa (kind)
+  update public.gateway_payments set refund_status = 'requested', refund_next_at = now() where id = gp;
+  if not exists (select 1 from jsonb_array_elements(public.gateway_refund_jobs()) x where x->>'kind' = 'point' and x->>'external_id' = 'ORD0003') then raise exception 'FALHA refund job'; end if;
+  perform public.gateway_refund_result(gp, true, 'ok');
+end $$;
+reset role;
+set role anon;
+do $$ declare r jsonb; begin
+  -- débito recusado: cliente escolhe pagar no caixa
+  r := public.totem_pay_at_counter(current_setting('test.pt'), current_setting('test.pord2'));
+  if r->>'status' not in ('pending','preparing') then raise exception 'FALHA caixa %', r; end if;
+end $$;
+reset role;
+do $$ declare o public.orders; begin
+  select * into o from public.orders where public_token = current_setting('test.pord2');
+  if o.payment_method <> 'cash' or o.notes not like '%PAGAR NO CAIXA%' or exists (select 1 from public.payments where order_id = o.id and status = 'pending') then raise exception 'FALHA troca para caixa %', o.notes; end if;
+end $$;
+select 'TOTEM CARTAO OK' as resultado;
