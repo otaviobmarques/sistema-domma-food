@@ -24,7 +24,11 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   }
   if (!memberships?.length) {
     const { data: admin } = await sb.from("platform_admins").select("user_id").eq("user_id", user.id).maybeSingle();
-    redirect(admin ? "/admin" : "/onboarding");
+    if (admin) redirect("/admin");
+    // parceiro de revenda sem loja própria vai para o portal da revenda
+    await sb.rpc("reseller_accept_invites");
+    const { data: resellers } = await sb.rpc("reseller_my");
+    redirect((resellers as unknown[] | null)?.length ? "/revenda" : "/onboarding");
   }
 
   const { data: units } = await sb.from("units").select("id, name, slug, tenant_id").order("created_at");

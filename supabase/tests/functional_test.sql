@@ -2518,3 +2518,129 @@ do $$ begin
 end $$;
 reset role;
 select 'PDV OFFLINE OK' as resultado;
+
+-- =====================================================================
+-- PORTAL DE REVENDAS
+-- =====================================================================
+reset role;
+insert into auth.users (id, email) values
+  ('ae000000-0000-4000-8000-000000000001','revenda@r.com'),
+  ('ae000000-0000-4000-8000-000000000002','cliente@c.com');
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare rid uuid; r jsonb; begin
+  rid := public.admin_reseller_save('{"name":"Revenda Sul","code":"Revenda-Sul","commission_pct":20,"owner_email":"REVENDA@r.com","contact_email":"contato@r.com"}');
+  perform set_config('test.rid', rid::text, false);
+  r := public.admin_resellers();
+  if r->0->'reseller'->>'code' <> 'revenda-sul' or r->0->'members'->0->>'email' <> 'revenda@r.com' or r->0->'members'->0->>'role' <> 'owner' then
+    raise exception 'FALHA revenda criada %', r; end if;
+  begin perform public.admin_reseller_save('{"name":"Outra","code":"revenda-sul"}'); raise exception 'FALHA código duplicado';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_reseller_save('{"name":"Outra","code":"outra","commission_pct":90}'); raise exception 'FALHA comissão alta';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_reseller_save('{"name":"Outra","code":"admin"}'); raise exception 'FALHA código reservado';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- convite para quem ainda não tem conta
+  perform public.admin_reseller_save(jsonb_build_object('id', rid, 'owner_email', 'socio@r.com'));
+  if (public.admin_resellers()->0->'invites'->0->>'email') <> 'socio@r.com' then raise exception 'FALHA convite do sócio'; end if;
+end $$;
+-- cliente cria a loja pelo link de indicação
+set request.jwt.claim.sub = 'ae000000-0000-4000-8000-000000000002';
+do $$ declare t jsonb; r jsonb; begin
+  t := public.create_tenant('Cliente Ltda', 'Pizzaria Cliente', 'pizzaria-cliente', false);
+  perform set_config('test.rt', t->>'tenant_id', false);
+  if public.reseller_public('REVENDA-SUL')->>'name' <> 'Revenda Sul' then raise exception 'FALHA reseller_public'; end if;
+  if public.reseller_public('nao-existe') is not null then raise exception 'FALHA código inexistente'; end if;
+  begin perform public.reseller_claim((t->>'tenant_id')::uuid, 'nao-existe'); raise exception 'FALHA link inválido';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  r := public.reseller_claim((t->>'tenant_id')::uuid, ' revenda-sul ');
+  if r->>'name' <> 'Revenda Sul' then raise exception 'FALHA claim %', r; end if;
+  if (public.reseller_claim((t->>'tenant_id')::uuid, 'revenda-sul')->>'already')::boolean is not true then raise exception 'FALHA claim repetido'; end if;
+  -- o dono não troca nem tira a revenda por conta própria
+  begin update public.tenants set reseller_id = null where id = (t->>'tenant_id')::uuid; raise exception 'FALHA dono tirou a revenda';
+  exception when insufficient_privilege then null; end;
+  begin perform public.reseller_overview(current_setting('test.rid')::uuid); raise exception 'FALHA cliente viu a revenda';
+  exception when insufficient_privilege then null; end;
+  begin perform public.admin_resellers(); raise exception 'FALHA cliente viu o admin';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- outra loja (antiga) não pode ser indicada depois de 30 dias
+reset role;
+update public.tenants set created_at = now() - interval '40 days' where id = current_setting('test.a_tenant')::uuid;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ begin
+  begin perform public.reseller_claim(current_setting('test.a_tenant')::uuid, 'revenda-sul'); raise exception 'FALHA loja antiga indicada';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.reseller_claim(current_setting('test.rt')::uuid, 'revenda-sul'); raise exception 'FALHA indicou loja de outro';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- faturas pagas da loja indicada
+reset role;
+insert into public.billing_invoices (tenant_id, provider_id, value_cents, net_cents, status, due_date, paid_at) values
+  (current_setting('test.rt')::uuid, 'pay_rs1', 22900, 20000, 'RECEIVED', current_date, now()),
+  (current_setting('test.rt')::uuid, 'pay_rs2', 22900, null, 'OVERDUE', current_date, null),
+  (current_setting('test.rt')::uuid, 'pay_rs0', 22900, 20000, 'RECEIVED', current_date - 40, now() - interval '40 days');
+set role authenticated;
+-- responsável pela revenda
+set request.jwt.claim.sub = 'ae000000-0000-4000-8000-000000000001';
+do $$ declare r jsonb; rid uuid := current_setting('test.rid')::uuid; t jsonb; begin
+  if public.reseller_accept_invites() <> 0 then raise exception 'FALHA aceitou convite que não era seu'; end if;
+  r := public.reseller_my();
+  if jsonb_array_length(r) <> 1 or r->0->>'role' <> 'owner' then raise exception 'FALHA reseller_my %', r; end if;
+  r := public.reseller_overview(rid);
+  if (r->'totals'->>'clients')::int <> 1 or r->'clients'->0->>'owner_email' <> 'cliente@c.com' or r->'clients'->0->>'name' <> 'Cliente Ltda' then
+    raise exception 'FALHA clientes %', r->'clients'; end if;
+  -- 20% de R$ 200,00 líquidos; fatura vencida e a anterior à indicação não contam
+  if (r->>'commission_total_cents')::int <> 4000 or (r->'months'->0->>'commission_cents')::int <> 4000 or (r->'months'->0->>'received_cents')::int <> 20000
+     or jsonb_array_length(r->'months') <> 12 then raise exception 'FALHA comissão %', r->'months'->0; end if;
+  if r->>'my_role' <> 'owner' or jsonb_array_length(r->'invites') <> 1 then raise exception 'FALHA equipe dono %', r; end if;
+  if (public.reseller_invite(rid, 'Equipe@R.com')->>'invited')::boolean is not true then raise exception 'FALHA convite equipe'; end if;
+  begin perform public.reseller_invite(rid, 'sem-arroba'); raise exception 'FALHA e-mail inválido';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.reseller_remove(rid, auth.uid()); raise exception 'FALHA removeu a si mesmo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  -- revenda não indica a própria loja
+  t := public.create_tenant('Revenda Loja', 'Loja da Revenda', 'loja-da-revenda', false);
+  begin perform public.reseller_claim((t->>'tenant_id')::uuid, 'revenda-sul'); raise exception 'FALHA autoindicação';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_reseller_payout(rid, current_date, 100); raise exception 'FALHA revenda lançou repasse';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- pessoa da equipe aceita o convite ao entrar
+reset role;
+insert into auth.users (id, email) values ('ae000000-0000-4000-8000-000000000003','equipe@r.com');
+set role authenticated;
+set request.jwt.claim.sub = 'ae000000-0000-4000-8000-000000000003';
+do $$ declare r jsonb; rid uuid := current_setting('test.rid')::uuid; begin
+  if public.reseller_accept_invites() <> 1 then raise exception 'FALHA aceitar convite'; end if;
+  r := public.reseller_overview(rid);
+  if r->>'my_role' <> 'staff' or r->'members' <> 'null'::jsonb then raise exception 'FALHA visão da equipe %', r->'members'; end if;
+  begin perform public.reseller_invite(rid, 'x@r.com'); raise exception 'FALHA equipe convidou';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- admin: repasse, saldo e vínculo manual
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare r jsonb; rid uuid := current_setting('test.rid')::uuid; pid uuid; begin
+  pid := public.admin_reseller_payout(rid, current_date, 1500, 'Pix');
+  r := public.admin_resellers()->0;
+  if (r->>'balance_cents')::int <> 2500 or (r->>'paid_total_cents')::int <> 1500 or (r->'months'->0->>'paid_cents')::int <> 1500 then raise exception 'FALHA saldo %', r; end if;
+  perform public.admin_reseller_payout_delete(pid);
+  if (public.admin_resellers()->0->>'balance_cents')::int <> 4000 then raise exception 'FALHA apagar repasse'; end if;
+  perform public.admin_reseller_link(current_setting('test.rt')::uuid, null);
+  if (public.admin_resellers()->0->'totals'->>'clients')::int <> 0 then raise exception 'FALHA desligar loja'; end if;
+  perform public.admin_reseller_link(current_setting('test.rt')::uuid, rid);
+  r := public.admin_resellers()->0;
+  -- religada agora: as faturas pagas antes do novo vínculo não contam
+  if (r->'totals'->>'clients')::int <> 1 or (r->>'commission_total_cents')::int <> 0 then raise exception 'FALHA religar %', r->'totals'; end if;
+  perform public.admin_reseller_save(jsonb_build_object('id', rid, 'active', false));
+end $$;
+set role anon;
+do $$ begin
+  if public.reseller_public('revenda-sul') is not null then raise exception 'FALHA revenda inativa aparece'; end if;
+  begin perform public.reseller_my(); raise exception 'FALHA anon reseller_my';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'REVENDAS OK' as resultado;
