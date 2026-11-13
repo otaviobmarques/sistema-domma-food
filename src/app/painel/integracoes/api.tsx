@@ -13,6 +13,7 @@ type Delivery = { id: number; endpoint_id: string; event: string; status: string
 type Overview = { keys: Key[]; webhooks: Hook[]; deliveries: Delivery[]; units: { id: string; name: string }[] };
 
 export const API_BASE = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/api/v1`;
+export const MCP_URL = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/mcp`;
 const SCOPES: [string, string][] = [
   ["orders:read", "Ler pedidos"], ["orders:write", "Mudar status de pedidos"],
   ["menu:read", "Ler cardápio"], ["menu:write", "Esgotar produto e mudar preço"], ["customers:read", "Ler clientes (dados pessoais)"],
@@ -21,16 +22,29 @@ const EVENTS: [string, string][] = [["order.created", "Pedido criado"], ["order.
 const D_STATUS: Record<string, string> = { queued: "Na fila", sending: "Enviando", sent: "Entregue", failed: "Falhou" };
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "nunca");
 
-function Secret({ label, value, note }: { label: string; value: string; note: string }) {
+function CopyRow({ label, value }: { label: string; value: string }) {
   const [ok, setOk] = useState(false);
   return (
     <div>
-      <p className="text-sm text-zinc-600">{note}</p>
       <p className="mt-3 text-xs font-medium text-zinc-600">{label}</p>
       <div className="mt-1 flex items-center gap-2">
         <code className="min-w-0 flex-1 break-all rounded bg-zinc-50 px-2 py-1.5 text-xs ring-1 ring-zinc-200">{value}</code>
         <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={async () => { try { await navigator.clipboard.writeText(value); setOk(true); } catch { /* ignora */ } }}>{ok ? "Copiado ✓" : "Copiar"}</button>
       </div>
+    </div>
+  );
+}
+function Secret({ label, value, note, mcp }: { label: string; value: string; note: string; mcp?: boolean }) {
+  return (
+    <div>
+      <p className="text-sm text-zinc-600">{note}</p>
+      <CopyRow label={label} value={value} />
+      {mcp && (
+        <>
+          <CopyRow label="Endereço MCP com a chave (para apps que só aceitam um endereço, como os conectores do Claude)" value={`${MCP_URL}/${value}`} />
+          <p className="mt-1 text-[11px] text-zinc-500">Quem tiver este endereço usa a loja com as permissões da chave: trate como senha.</p>
+        </>
+      )}
     </div>
   );
 }
@@ -43,7 +57,7 @@ export function ApiCard() {
   const [err, setErr] = useState("");
   const [newKey, setNewKey] = useState<{ name: string; scopes: string[]; unit: string } | null>(null);
   const [newHook, setNewHook] = useState<{ url: string; events: string[]; unit: string } | null>(null);
-  const [shown, setShown] = useState<{ title: string; label: string; value: string; note: string } | null>(null);
+  const [shown, setShown] = useState<{ title: string; label: string; value: string; note: string; mcp?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -63,7 +77,7 @@ export function ApiCard() {
   async function createKey() {
     if (!newKey) return;
     const d = await call(() => sb.rpc("api_key_create", { p_tenant_id: tenantId, p_name: newKey.name, p_scopes: newKey.scopes, p_unit_id: newKey.unit || null }));
-    if (d) { setNewKey(null); setShown({ title: "Chave de API criada", label: "Chave", value: d.key, note: "Copie agora e guarde num lugar seguro (no servidor da integração). Ela não aparece de novo; se perder, revogue e crie outra." }); }
+    if (d) { setNewKey(null); setShown({ title: "Chave de API criada", label: "Chave", value: d.key, mcp: true, note: "Copie agora e guarde num lugar seguro (no servidor da integração). Ela não aparece de novo; se perder, revogue e crie outra." }); }
   }
   async function createHook() {
     if (!newHook) return;
@@ -112,6 +126,16 @@ export function ApiCard() {
             ))}
           </ul>
         )}
+      </div>
+
+      <div className="rounded-xl bg-zinc-50 p-3">
+        <h3 className="font-semibold">Conectar a um assistente de IA (MCP)</h3>
+        <p className="mt-1 text-xs text-zinc-600">
+          Com uma chave, o Claude (ou outro app compatível com MCP) consulta vendas e pedidos, esgota produtos e muda status conversando.
+          Crie uma chave só com as permissões que quer liberar: uma chave só de leitura não altera nada.
+        </p>
+        <p className="mt-2 text-xs text-zinc-600">Endereço: <code className="break-all">{MCP_URL}</code> com o cabeçalho <code>Authorization: Bearer sua_chave</code>.
+          Apps que só aceitam um endereço (como os conectores do Claude): use <code>{MCP_URL}/sua_chave</code>. Passo a passo na documentação.</p>
       </div>
 
       <div>
@@ -221,7 +245,7 @@ export function ApiCard() {
       )}
       {shown && (
         <Modal open onClose={() => setShown(null)} title={shown.title}>
-          <Secret label={shown.label} value={shown.value} note={shown.note} />
+          <Secret label={shown.label} value={shown.value} note={shown.note} mcp={shown.mcp} />
           <div className="mt-4 flex justify-end"><button className="btn-primary" onClick={() => setShown(null)}>Pronto, copiei</button></div>
         </Modal>
       )}

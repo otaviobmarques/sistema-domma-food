@@ -361,3 +361,18 @@ Painel: **Integrações › API e webhooks** (só o dono). Documentação públi
 - **Assinatura**: `Domma-Signature: t=<unix>,v1=<hmac-sha256(segredo, "t.corpo")>`. O segredo `whsec_…` fica no Vault, aparece uma vez e pode ser trocado.
 - **Endereços aceitos**: só `https` público. IP, localhost, `.local` e `.internal` são recusados no banco, e o worker confere o DNS (sem rede interna) e não segue redirecionamentos.
 - **Novas tentativas**: 1 min, 5 min, 30 min, 2 h e 6 h. Depois de 50 falhas seguidas o endpoint é desligado. O cron `domma-webhooks` roda a cada minuto, e o histórico fica 30 dias.
+
+## Servidor MCP (assistentes de IA)
+
+Função `mcp` (Model Context Protocol, HTTP sem sessão). Usa a **mesma chave de API**, com os mesmos escopos, a mesma loja e o mesmo limite. Produto bandeira branca: não conversa com outros produtos.
+
+- **Conexão**: `POST /functions/v1/mcp` com `Authorization: Bearer dmf_…`. Para apps que só aceitam um endereço (conectores personalizados do Claude), use `/functions/v1/mcp/dmf_…`. Esse endereço vale como senha.
+- **Ferramentas** (cada uma só aparece se a chave tiver a permissão):
+  - `info_conta`
+  - `resumo_vendas` (hoje ou um período: faturamento, ticket, canais, pagamentos, por hora ou por dia, mais vendidos)
+  - `listar_pedidos` e `ver_pedido` (pelo número)
+  - `mudar_status_pedido` (regras do painel; cancelar exige motivo)
+  - `ver_cardapio` e `buscar_produto` (sem acento)
+  - `disponibilidade_produto` e `alterar_preco` (em reais). Com o nome do produto, se houver mais de um que combine, a ferramenta devolve a lista para escolher.
+  - `listar_clientes`
+- **Banco**: `api_call_ext` com `reports.sales`, `orders.find` e `products.search`.

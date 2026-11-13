@@ -2297,3 +2297,46 @@ do $$ begin
 end $$;
 reset role;
 select 'API OK' as resultado;
+
+-- =====================================================================
+-- CONSULTAS EXTRAS DA API (MCP)
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare r jsonb; begin
+  r := public.api_key_create(current_setting('test.wt')::uuid, 'MCP teste', array['orders:read','menu:read']);
+  perform set_config('test.mcpkey', r->>'id', false);
+  r := public.api_key_create(current_setting('test.wt')::uuid, 'Só cardápio', array['menu:write']);
+  perform set_config('test.mcpkey2', r->>'id', false);
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare k uuid := current_setting('test.mcpkey')::uuid; r jsonb; v_num int; v_name text; begin
+  r := public.api_call_ext(k, 'reports.sales', jsonb_build_object('from', now() - interval '30 days', 'to', now() + interval '1 minute'));
+  if (r->'totals'->>'orders')::int < 1 or (r->'totals'->>'revenue_cents')::int <= 0 or jsonb_typeof(r->'by_day') <> 'array'
+     or jsonb_array_length(r->'top_products') < 1 or r->'by_hour' <> 'null'::jsonb then raise exception 'FALHA relatório %', r; end if;
+  r := public.api_call_ext(k, 'reports.sales');   -- hoje
+  if r->'period'->>'timezone' is null or jsonb_typeof(r->'by_hour') <> 'array' then raise exception 'FALHA relatório hoje %', r; end if;
+  if public.api_call_ext(k, 'reports.sales', '{"from":"2026-01-02","to":"2026-01-01"}')->>'error' <> 'invalid' then raise exception 'FALHA período'; end if;
+  select number into v_num from public.orders where unit_id = current_setting('test.funit')::uuid order by created_at desc limit 1;
+  r := public.api_call_ext(k, 'orders.find', jsonb_build_object('number', v_num));
+  if (r->'data'->>'number')::int <> v_num then raise exception 'FALHA busca número %', r; end if;
+  if public.api_call_ext(k, 'orders.find', '{"number": 999999}')->>'error' <> 'not_found' then raise exception 'FALHA número inexistente'; end if;
+  select name into v_name from public.products where id = current_setting('test.pid')::uuid;
+  r := public.api_call_ext(k, 'products.search', jsonb_build_object('q', upper(left(v_name, 5))));
+  if not exists (select 1 from jsonb_array_elements(r->'data') x where x->>'id' = current_setting('test.pid')) then raise exception 'FALHA busca produto % %', v_name, r; end if;
+  if jsonb_array_length(public.api_call_ext(k, 'products.search', '{"q":"x"}')->'data') <> 0 then raise exception 'FALHA busca curta'; end if;
+  -- escopos: chave só de cardápio (escrita) busca produto mas não vê vendas
+  if public.api_call_ext(current_setting('test.mcpkey2')::uuid, 'reports.sales')->>'error' <> 'forbidden' then raise exception 'FALHA escopo relatório'; end if;
+  if public.api_call_ext(current_setting('test.mcpkey2')::uuid, 'products.search', '{"q":"pizza"}')->>'error' is not null then raise exception 'FALHA escopo busca'; end if;
+  begin perform public.api_call_ext(k, 'nada'); exception when others then raise exception 'FALHA op'; end;
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  begin perform public.api_call_ext(gen_random_uuid(), 'reports.sales'); raise exception 'FALHA anon'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'API EXTRA OK' as resultado;
