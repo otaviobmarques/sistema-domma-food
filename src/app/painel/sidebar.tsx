@@ -134,7 +134,7 @@ export function Sidebar() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs text-zinc-700">{email}</p>
               <button className="mt-0.5 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900"
-                onClick={async () => { await supabaseBrowser().auth.signOut(); router.replace("/login"); router.refresh(); }}>
+                onClick={async () => { navigator.serviceWorker?.controller?.postMessage({ type: "logout" }); await supabaseBrowser().auth.signOut(); router.replace("/login"); router.refresh(); }}>
                 <Svg name="logout" className="h-3.5 w-3.5" /> Sair
               </button>
             </div>

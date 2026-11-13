@@ -2437,3 +2437,84 @@ do $$ declare o public.orders; begin
   if o.payment_method <> 'cash' or o.notes not like '%PAGAR NO CAIXA%' or exists (select 1 from public.payments where order_id = o.id and status = 'pending') then raise exception 'FALHA troca para caixa %', o.notes; end if;
 end $$;
 select 'TOTEM CARTAO OK' as resultado;
+
+-- =====================================================================
+-- PDV: MODO OFFLINE (fila do aparelho, envio idempotente)
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare
+  u uuid := (select id from public.units where slug = 'bella-massa');
+  pid uuid := (select id from public.products where tenant_id = current_setting('test.a_tenant')::uuid limit 1);
+  r jsonb; r2 jsonb; o public.orders; price int; ref1 uuid := gen_random_uuid(); ref2 uuid := gen_random_uuid(); ref3 uuid := gen_random_uuid();
+  items jsonb; sold timestamptz := date_trunc('second', now() - interval '2 hours');
+begin
+  if not (public.cash_status(u)->>'open')::boolean then perform public.cash_open(u, 0); end if;
+  items := jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1));
+  -- online com identificador: reenviar devolve a mesma venda
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', ref1, 'items', items,
+    'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',10000))));
+  price := (r->>'total_cents')::int;
+  r2 := public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', ref1, 'items', items,
+    'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',10000))));
+  if r2->>'order_id' <> r->>'order_id' or (r2->>'duplicate')::boolean is not true then raise exception 'FALHA idempotência online %', r2; end if;
+  if (select count(*) from public.orders where client_ref = ref1) <> 1 then raise exception 'FALHA duplicou'; end if;
+  if (select status from public.orders where id = (r->>'order_id')::uuid) <> 'preparing' then raise exception 'FALHA online deve ir à cozinha'; end if;
+
+  -- offline: entra concluído, com a hora real da venda
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', ref2, 'offline_sold_at', sold, 'subtotal_cents', price,
+    'items', items, 'snapshot', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1, 'unit_price_cents', price)),
+    'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',price))));
+  if (r->>'offline')::boolean is not true or (r->>'price_adjusted')::boolean then raise exception 'FALHA offline %', r; end if;
+  select * into o from public.orders where id = (r->>'order_id')::uuid;
+  if o.status <> 'completed' or o.created_at <> sold or o.offline_sold_at <> sold or o.paid_at <> sold or o.completed_at <> sold
+     or o.client_ref <> ref2 then raise exception 'FALHA pedido offline %', row_to_json(o); end if;
+  if (select count(*) from public.order_events where order_id = o.id) <> 2
+     or not exists (select 1 from public.order_events where order_id = o.id and note like 'Venda no balcão feita sem internet%') then raise exception 'FALHA eventos offline'; end if;
+  if (select sum(amount_cents) from public.cash_moves where order_id = o.id and kind = 'sale') <> price then raise exception 'FALHA caixa offline'; end if;
+  r2 := public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', ref2, 'offline_sold_at', sold, 'subtotal_cents', price,
+    'items', items, 'payments', jsonb_build_array(jsonb_build_object('method','pix','amount_cents',price))));
+  if r2->>'order_id' <> o.id::text or (r2->>'duplicate')::boolean is not true then raise exception 'FALHA idempotência offline'; end if;
+
+  -- preço mudou enquanto estava sem internet: vale o cobrado
+  r := public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', ref3, 'offline_sold_at', now(), 'subtotal_cents', 1234,
+    'items', items, 'snapshot', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1, 'unit_price_cents', 1234,
+      'options', jsonb_build_array(jsonb_build_object('name', 'Borda', 'price_cents', 0)))),
+    'payments', jsonb_build_array(jsonb_build_object('method','debit_card','amount_cents',1234))));
+  if (r->>'total_cents')::int <> 1234 or (r->>'price_adjusted')::boolean is not true then raise exception 'FALHA ajuste %', r; end if;
+  if not exists (select 1 from public.audit_logs where action = 'offline_sale' and entity_id = r->>'order_id' and (after->>'price_adjusted')::boolean) then
+    raise exception 'FALHA auditoria offline'; end if;
+  if (select unit_price_cents from public.order_items where order_id = (r->>'order_id')::uuid) <> 1234 then raise exception 'FALHA item ajustado'; end if;
+
+  -- recusas
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', gen_random_uuid(), 'offline_sold_at', now(), 'subtotal_cents', price,
+    'items', items, 'payments', jsonb_build_array(jsonb_build_object('method','credit_account','amount_cents',price)))); raise exception 'FALHA fiado offline';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', gen_random_uuid(), 'offline_sold_at', now() - interval '10 days', 'subtotal_cents', price,
+    'items', items, 'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',price)))); raise exception 'FALHA data antiga';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'offline_sold_at', now(), 'subtotal_cents', price,
+    'items', items, 'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',price)))); raise exception 'FALHA sem identificador';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', 'abc', 'items', items,
+    'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',price)))); raise exception 'FALHA identificador inválido';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', gen_random_uuid(), 'offline_sold_at', now(), 'subtotal_cents', 500,
+    'items', items, 'snapshot', jsonb_build_array(jsonb_build_object('product_id', gen_random_uuid(), 'quantity', 1, 'unit_price_cents', 500)),
+    'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',500)))); raise exception 'FALHA produto de fora';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.pos_sale(jsonb_build_object('unit_id', u, 'client_ref', gen_random_uuid(), 'offline_sold_at', now(), 'subtotal_cents', 500,
+    'items', items, 'snapshot', jsonb_build_array(jsonb_build_object('product_id', pid, 'quantity', 1, 'unit_price_cents', -5)),
+    'payments', jsonb_build_array(jsonb_build_object('method','cash','amount_cents',500)))); raise exception 'FALHA preço negativo';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+-- quem não é do caixa (cozinha) não vende nem consulta venda pelo identificador
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.pos_sale(jsonb_build_object('unit_id', (select id from public.units where slug = 'bella-massa'), 'client_ref', gen_random_uuid(),
+    'items', '[]'::jsonb, 'payments', '[]'::jsonb)); raise exception 'FALHA cozinha vendeu';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'PDV OFFLINE OK' as resultado;

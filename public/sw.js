@@ -1,13 +1,17 @@
-/* Domma Food · app do cliente (cardápio instalável)
-   - Avisos do pedido no aparelho (Web Push)
-   - Página simples quando o aparelho está sem internet
-   Só mexe nas páginas do cardápio e do pedido; o painel passa direto. */
-const VERSION = "df-sw-1";
+/* Domma Food · service worker
+   - App do cliente: avisos do pedido no aparelho (Web Push) e página simples sem internet
+   - Caixa (PDV) offline: guarda a tela /painel/caixa e os arquivos dela para abrir sem internet
+   O resto do painel passa direto. */
+const VERSION = "df-sw-2";
+const PANEL = "df-caixa-1";        // tela do caixa (apagada ao sair da conta)
+const STATIC = "df-static-1";      // arquivos de /_next/static (nome com hash, nunca mudam)
+const KEEP = [VERSION, PANEL, STATIC];
+const CAIXA = "/painel/caixa";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k !== VERSION) await caches.delete(k);
+    for (const k of await caches.keys()) if (!KEEP.includes(k)) await caches.delete(k);
     await self.clients.claim();
   })());
 });
@@ -19,11 +23,73 @@ button{margin-top:16px;border:0;border-radius:999px;padding:12px 22px;background
 <p style="color:#71717a;max-width:300px">Assim que a conexão voltar, o cardápio e o seu pedido aparecem de novo.</p>
 <button onclick="location.reload()">Tentar de novo</button></main></body></html>`;
 
+async function fromCaixa(event) {
+  const id = event.clientId || event.resultingClientId;
+  const c = id ? await self.clients.get(id) : null;
+  return !!c && new URL(c.url).pathname.startsWith(CAIXA);
+}
+async function trim(cache, max) {
+  const keys = await cache.keys();
+  for (let i = 0; i < keys.length - max; i++) await cache.delete(keys[i]);
+}
+
+self.addEventListener("message", (event) => {
+  // ao sair da conta: apaga a tela guardada (tem o nome da loja e o e-mail de quem entrou)
+  if (event.data && event.data.type === "logout") event.waitUntil(caches.delete(PANEL));
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.mode !== "navigate" || req.method !== "GET") return;
+  if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin || /^\/(painel|admin|login|onboarding|auth|api|entregador|totem)(\/|$)/.test(url.pathname)) return;
+  if (url.origin !== self.location.origin) return;
+
+  // tela do caixa: sempre tenta a internet; sem conexão, abre a última versão guardada
+  if (req.mode === "navigate" && url.pathname === CAIXA) {
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(req);
+        if (res.ok && !res.redirected) { const c = await caches.open(PANEL); await c.put(CAIXA, res.clone()); }
+        return res;
+      } catch {
+        const hit = await caches.match(CAIXA, { cacheName: PANEL });
+        return hit || new Response(OFFLINE_HTML.replace("Assim que a conexão voltar, o cardápio e o seu pedido aparecem de novo.",
+          "A tela do caixa ainda não foi guardada neste aparelho. Abra o caixa com internet uma vez para poder vender sem conexão depois."), { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } });
+      }
+    })());
+    return;
+  }
+  // arquivos do Next: do cache quando houver; guarda os que a tela do caixa usa
+  if (url.pathname.startsWith("/_next/static/")) {
+    event.respondWith((async () => {
+      const hit = await caches.match(req, { cacheName: STATIC });
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res.ok && (await fromCaixa(event))) {
+        const c = await caches.open(STATIC); await c.put(req, res.clone()); await trim(c, 400);
+      }
+      return res;
+    })());
+    return;
+  }
+  // imagens e ícones da própria plataforma usados pelo caixa: internet primeiro, cópia guardada sem conexão
+  if (req.mode !== "navigate" && req.destination === "image" && !url.searchParams.has("_rsc")) {
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(req);
+        if (res.ok && (await fromCaixa(event))) { const c = await caches.open(PANEL); await c.put(req, res.clone()); }
+        return res;
+      } catch {
+        const hit = await caches.match(req, { cacheName: PANEL });
+        if (hit) return hit;
+        throw new Error("offline");
+      }
+    })());
+    return;
+  }
+
+  if (req.mode !== "navigate") return;
+  if (/^\/(painel|admin|login|onboarding|auth|api|entregador|totem)(\/|$)/.test(url.pathname)) return;
   event.respondWith(fetch(req).catch(() => new Response(OFFLINE_HTML, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } })));
 });
 

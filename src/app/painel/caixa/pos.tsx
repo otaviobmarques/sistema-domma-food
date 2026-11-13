@@ -9,10 +9,11 @@ import { METHOD_LABEL, PAY_METHODS, type PayMethod as Method } from "./types";
 import { CreditInfo, creditAvailable, useCreditCustomer } from "@/components/pos/credit-info";
 import { printReceipt, type Receipt } from "./receipt";
 import { EmitButton } from "@/components/fiscal/emit-button";
+import { isNetworkError, saleCode, type PosQueue } from "@/lib/offline/pos-queue";
 
 type Pay = { key: string; method: Method; value: string };
 
-export function Pos({ onSold }: { onSold: () => void }) {
+export function Pos({ onSold, queue, sessionId, netDown = false }: { onSold: () => void; queue: PosQueue; sessionId: string; netDown?: boolean }) {
   const { unit, tenantId } = usePanel();
   const catalog = usePosCatalog(tenantId, unit.id, "counter");
   const [lines, setLines] = useState<PosLine[]>([]);
@@ -42,7 +43,9 @@ export function Pos({ onSold }: { onSold: () => void }) {
   const creditAmt = pays.filter((p) => p.method === "credit_account").reduce((s, p) => s + parseBRL(p.value), 0);
   const creditCust = useCreditCustomer(tenantId, phone, creditAmt > 0 || pays.some((p) => p.method === "credit_account"));
   const creditOk = creditAmt === 0 || (!!creditCust && creditAvailable(creditCust) >= creditAmt);
-  const canFinish = creditOk && lines.length > 0 && paid >= total && change <= cashPaid && pays.every((p) => parseBRL(p.value) > 0) && pays.length > 0 && !busy;
+  const offline = netDown || !queue.online;
+  const creditBlocked = offline && pays.some((p) => p.method === "credit_account");
+  const canFinish = !creditBlocked && creditOk && lines.length > 0 && paid >= total && change <= cashPaid && pays.every((p) => parseBRL(p.value) > 0) && pays.length > 0 && !busy;
 
   const addLine = useCallback((l: PosLine) => {
     setErr("");
@@ -70,20 +73,46 @@ export function Pos({ onSold }: { onSold: () => void }) {
     if (!canFinish) return;
     setBusy(true); setErr("");
     const payments = pays.map((p) => ({ method: p.method, amount_cents: parseBRL(p.value) }));
-    const { data, error } = await supabaseBrowser().rpc("pos_sale", {
-      p: { unit_id: unit.id, type, items: linesToPayload(lines), customer: { name: name.trim(), phone: onlyDigits(phone) },
-        discount_cents: discount, notes: notes.trim(), payments },
+    // o identificador acompanha a venda: se a resposta se perder, o reenvio não duplica
+    const ref = crypto.randomUUID();
+    const p = { unit_id: unit.id, type, items: linesToPayload(lines), customer: { name: name.trim(), phone: onlyDigits(phone) },
+      discount_cents: discount, notes: notes.trim(), payments, client_ref: ref };
+    const base: Receipt = {
+      store: unit.name, number: 0, lines, subtotal, discount, total, change,
+      payments: payments.map((x) => ({ label: METHOD_LABEL[x.method], amount: x.amount_cents })),
+      customer: name.trim() || undefined, type: type === "dine_in" ? "Comer aqui" : "Para viagem", notes: notes.trim() || undefined,
+    };
+    let netDown = offline;
+    if (!netDown) {
+      const { data, error } = await supabaseBrowser().rpc("pos_sale", { p }).abortSignal(AbortSignal.timeout(12_000));
+      if (!error) {
+        queue.setNet(true);
+        setBusy(false);
+        setDoneOrderId(data.order_id ?? null);
+        setDone({ ...base, number: data.number, total: data.total_cents, change: data.change_cents });
+        onSold();
+        return;
+      }
+      if (!isNetworkError(error)) { setBusy(false); setErr(errorMessage(error)); return; }
+      netDown = true;
+      queue.setNet(false);
+    }
+    // sem internet: guarda no aparelho e envia quando a conexão voltar
+    if (payments.some((x) => x.method === "credit_account")) { setBusy(false); setErr("Sem internet: fiado não pode ser vendido agora. Use outra forma de pagamento."); return; }
+    const at = new Date().toISOString();
+    const code = saleCode(ref);
+    const receipt: Receipt = { ...base, number: code, offline: true, at };
+    const ok = queue.add({
+      ref, code, sold_at: at, total_cents: total, customer: name.trim() || undefined, receipt,
+      payload: { ...p, offline_sold_at: at, subtotal_cents: subtotal, cash_session_id: sessionId,
+        snapshot: lines.map((l) => ({ product_id: l.product_id, quantity: l.quantity, unit_price_cents: l.unit_price_cents, notes: l.notes || undefined,
+          options: l.options.map((o) => ({ option_id: o.option_id, name: o.name, price_cents: o.price_cents, quantity: o.quantity, group: o.group })) })) },
     });
     setBusy(false);
-    if (error) { setErr(errorMessage(error)); return; }
-    setDoneOrderId(data.order_id ?? null);
-    setDone({
-      store: unit.name, number: data.number, lines, subtotal, discount, total: data.total_cents, change: data.change_cents,
-      payments: payments.map((p) => ({ label: METHOD_LABEL[p.method], amount: p.amount_cents })),
-      customer: name.trim() || undefined, type: type === "dine_in" ? "Comer aqui" : "Para viagem", notes: notes.trim() || undefined,
-    });
-    onSold();
-  }, [canFinish, pays, unit.id, unit.name, type, lines, name, phone, discount, notes, subtotal, onSold]);
+    if (!ok) { setErr("Sem internet e sem espaço para guardar a venda neste aparelho. Anote a venda à mão."); return; }
+    setDoneOrderId(null);
+    setDone(receipt);
+  }, [canFinish, offline, pays, unit.id, unit.name, type, lines, name, phone, discount, notes, subtotal, total, change, queue, sessionId, onSold]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "F10") { e.preventDefault(); if (done) reset(); else finish(); } };
@@ -94,12 +123,25 @@ export function Pos({ onSold }: { onSold: () => void }) {
   if (done) {
     return (
       <div className="card mx-auto max-w-md space-y-4 p-8 text-center">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-green-100 text-2xl text-green-700">✓</div>
-        <div>
-          <p className="text-sm text-zinc-500">Venda registrada</p>
-          <p className="text-3xl font-semibold">Pedido #{done.number}</p>
-          <p className="mt-1 text-sm text-zinc-600">Total {brl(done.total)} · enviado para a cozinha</p>
-        </div>
+        {done.offline ? (
+          <>
+            <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-amber-100 text-2xl text-amber-800">⏳</div>
+            <div>
+              <p className="text-sm text-zinc-500">Venda guardada neste aparelho (sem internet)</p>
+              <p className="text-3xl font-semibold">Venda {done.number}</p>
+              <p className="mt-1 text-sm text-zinc-600">Total {brl(done.total)}. Imprima o cupom e entregue à cozinha: o pedido entra no sistema quando a conexão voltar.</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-green-100 text-2xl text-green-700">✓</div>
+            <div>
+              <p className="text-sm text-zinc-500">Venda registrada</p>
+              <p className="text-3xl font-semibold">Pedido #{done.number}</p>
+              <p className="mt-1 text-sm text-zinc-600">Total {brl(done.total)} · enviado para a cozinha</p>
+            </div>
+          </>
+        )}
         {done.change > 0 && (
           <div className="rounded-xl bg-amber-50 p-4 ring-1 ring-amber-200">
             <p className="text-sm font-semibold text-amber-900">Troco</p>
@@ -108,8 +150,8 @@ export function Pos({ onSold }: { onSold: () => void }) {
         )}
         {doneOrderId && <EmitButton orderId={doneOrderId} compact />}
         <div className="flex gap-2">
-          <button className="btn-secondary flex-1" onClick={() => printReceipt(done)}>Imprimir cupom</button>
-          <button className="btn-primary flex-1" onClick={reset} autoFocus>Nova venda (F10)</button>
+          <button className={`${done.offline ? "btn-primary" : "btn-secondary"} flex-1`} onClick={() => printReceipt(done)}>{done.offline ? "Imprimir cupom (cozinha)" : "Imprimir cupom"}</button>
+          <button className={`${done.offline ? "btn-secondary" : "btn-primary"} flex-1`} onClick={reset} autoFocus>Nova venda (F10)</button>
         </div>
       </div>
     );
@@ -177,7 +219,8 @@ export function Pos({ onSold }: { onSold: () => void }) {
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500">Pagamento</p>
           <div className="grid grid-cols-3 gap-1.5">
             {PAY_METHODS.map((m) => (
-              <button key={m} type="button" disabled={!lines.length} onClick={() => addPay(m)}
+              <button key={m} type="button" disabled={!lines.length || (offline && m === "credit_account")} onClick={() => addPay(m)}
+                title={offline && m === "credit_account" ? "Fiado precisa de internet" : undefined}
                 className="rounded-lg border border-zinc-300 bg-white px-1 py-2 text-xs font-semibold hover:border-brand-500 hover:text-brand-700 disabled:opacity-40">
                 {METHOD_LABEL[m]}
               </button>
@@ -204,9 +247,10 @@ export function Pos({ onSold }: { onSold: () => void }) {
           {change > cashPaid && <p className="mt-1 text-xs text-red-700">Só é possível dar troco sobre o valor em dinheiro.</p>}
         </div>
 
+        {creditBlocked && <p className="text-xs text-red-700">Sem internet: fiado não pode ser vendido agora.</p>}
         <Alert>{err}</Alert>
         <button type="button" className="btn-success w-full py-3 text-base" disabled={!canFinish} onClick={finish}>
-          {busy ? "Registrando..." : `Finalizar (F10) · ${brl(total)}`}
+          {busy ? "Registrando..." : `${offline ? "Finalizar sem internet" : "Finalizar"} (F10) · ${brl(total)}`}
         </button>
       </aside>
     </div>

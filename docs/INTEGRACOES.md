@@ -394,3 +394,31 @@ Função `mcp` (Model Context Protocol, HTTP sem sessão). Usa a **mesma chave d
   - `disponibilidade_produto` e `alterar_preco` (em reais). Com o nome do produto, se houver mais de um que combine, a ferramenta devolve a lista para escolher.
   - `listar_clientes`
 - **Banco**: `api_call_ext` com `reports.sales`, `orders.find` e `products.search`.
+
+## Caixa offline (PDV sem internet)
+
+- **Quando a internet cai**, o Caixa / PDV continua vendendo:
+  - a venda fica guardada no próprio aparelho, com um código provisório de 6 letras e números (por exemplo, `E57B47`);
+  - o cupom impresso mostra "SEM INTERNET" e serve de via para a cozinha.
+- **Quando a conexão volta**, as vendas são enviadas sozinhas, em ordem. Também dá para tocar em "Enviar agora".
+  - O aviso mostra para qual pedido cada código virou (por exemplo, "Venda E57B47 → Pedido #381").
+- **Como entra no sistema** (`pos_sale` com `offline_sold_at`):
+  - O pedido entra com a hora real da venda, já concluído:
+    - não volta para o KDS e não é impresso de novo;
+    - o estoque, a fidelidade e o caixa são atualizados como numa venda normal.
+  - Cada venda leva um identificador (`client_ref`), e reenviar não duplica. Isso vale também para a venda online cuja resposta se perdeu.
+  - Se o preço mudou enquanto o aparelho estava sem internet, vale o que foi cobrado do cliente. O ajuste fica na auditoria (`offline_sale`, `price_adjusted`).
+  - A venda vai para o caixa em que foi feita. Se esse caixa já foi fechado, vai para o caixa aberto no momento.
+- **Sem internet não dá para:**
+  - vender fiado;
+  - fazer sangria ou suprimento;
+  - fechar o caixa.
+  O fechamento também fica bloqueado enquanto houver venda guardada sem envio.
+- **Abrir a tela sem internet:**
+  - o service worker guarda a tela do caixa e os arquivos dela;
+  - o cardápio e a situação do caixa ficam salvos no aparelho.
+  - Basta ter aberto o caixa com internet uma vez naquele aparelho. Ao sair da conta, a tela guardada é apagada; as vendas pendentes continuam no aparelho.
+- **Erros no envio:**
+  - Se uma venda for recusada (por exemplo, desconto acima do limite de quem enviou), ela aparece com o motivo e é reenviada a cada 30 segundos.
+  - Um gerente pode entrar e reenviar. O dono ou gerente também pode descartar a venda.
+- **Limites:** a fila fica no navegador daquele aparelho. Vendas com mais de 7 dias não são aceitas.
