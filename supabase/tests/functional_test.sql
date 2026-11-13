@@ -2137,3 +2137,163 @@ do $$ begin
 end $$;
 reset role;
 select 'CARRINHO OK' as resultado;
+
+-- =====================================================================
+-- API PÚBLICA E WEBHOOKS
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.wt')::uuid; r jsonb; begin
+  r := public.api_key_create(t, 'Integração teste', array['orders:read','orders:write','menu:read','menu:write','customers:read']);
+  if r->>'key' !~ '^dmf_[a-f0-9]{48}$' then raise exception 'FALHA chave %', r; end if;
+  perform set_config('test.apikey', r->>'key', false);
+  r := public.api_key_create(t, 'Só leitura da loja', array['orders:read'], current_setting('test.funit')::uuid);
+  perform set_config('test.apikey2', r->>'key', false);
+  begin perform public.api_key_create(t, 'Ruim', array['tudo']); raise exception 'FALHA escopo'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.webhook_save(t, null, '{"url":"http://hooks.example.com/x"}'); raise exception 'FALHA http'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.webhook_save(t, null, '{"url":"https://127.0.0.1/x"}'); raise exception 'FALHA ip'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.webhook_save(t, null, '{"url":"https://localhost/x"}'); raise exception 'FALHA localhost'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.webhook_save(t, null, '{"url":"https://erp.empresa.internal/x"}'); raise exception 'FALHA internal'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  r := public.webhook_save(t, null, '{"url":"https://Hooks.Example.com/Recebe/AbC123","events":["order.created","order.status_changed","order.paid"]}');
+  if r->>'secret' !~ '^whsec_[a-f0-9]{48}$' then raise exception 'FALHA segredo %', r; end if;
+  perform set_config('test.whid', r->>'id', false);
+  r := public.api_overview(t);
+  if r->'webhooks'->0->>'url' <> 'https://hooks.example.com/Recebe/AbC123' or jsonb_array_length(r->'keys') <> 2 then raise exception 'FALHA overview %', r->'webhooks'; end if;
+  if r::text like '%' || current_setting('test.apikey') || '%' then raise exception 'FALHA vazou chave'; end if;
+end $$;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  begin perform public.api_overview(current_setting('test.wt')::uuid); raise exception 'FALHA caixa vê API'; exception when insufficient_privilege then null; end;
+  begin perform public.api_key_create(current_setting('test.wt')::uuid, 'Caixa', array['orders:read']); raise exception 'FALHA caixa cria chave'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+-- pedido novo gera webhook "order.created"
+set role anon;
+do $$ declare r jsonb; begin
+  r := public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+    'customer', jsonb_build_object('name','API Teste','phone','31988887777'),
+    'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1))));
+  perform set_config('test.apiorder', r->>'order_id', false);
+end $$;
+reset role;
+do $$ declare d public.webhook_deliveries; begin
+  select * into d from public.webhook_deliveries where event = 'order.created' and payload->'data'->'order'->>'id' = current_setting('test.apiorder');
+  if not found or d.payload->'data'->'order'->'items'->0->>'name' is null or d.payload->'data'->'order'->'customer'->>'phone' <> '31988887777' then
+    raise exception 'FALHA webhook criado %', d.payload; end if;
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare a jsonb; k uuid; r jsonb; i int; begin
+  if public.api_auth(encode(extensions.digest('dmf_errada', 'sha256'), 'hex'))->>'error' <> 'invalid_key' then raise exception 'FALHA chave errada'; end if;
+  a := public.api_auth(encode(extensions.digest(current_setting('test.apikey'), 'sha256'), 'hex'));
+  if a->>'tenant_id' <> current_setting('test.wt') then raise exception 'FALHA auth %', a; end if;
+  k := (a->>'key_id')::uuid; perform set_config('test.apikeyid', k::text, false);
+  r := public.api_call(k, 'me');
+  if r->'tenant'->>'id' <> current_setting('test.wt') or jsonb_array_length(r->'units') < 1 then raise exception 'FALHA me %', r; end if;
+  r := public.api_call(k, 'orders.list', '{"limit":5}');
+  if jsonb_array_length(r->'data') <> 5 or r->>'next_before' is null then raise exception 'FALHA lista %', jsonb_array_length(r->'data'); end if;
+  r := public.api_call(k, 'orders.list', jsonb_build_object('limit', 5, 'before', r->>'next_before'));
+  if jsonb_array_length(r->'data') < 1 then raise exception 'FALHA paginação'; end if;
+  r := public.api_call(k, 'orders.get', jsonb_build_object('id', current_setting('test.apiorder')));
+  if r->'data'->>'status' is null or r->'data'->>'tracking_url' not like 'https://domma-food.vercel.app/pedido/%' then raise exception 'FALHA get %', r; end if;
+  if public.api_call(k, 'orders.get', jsonb_build_object('id', gen_random_uuid()))->>'error' <> 'not_found' then raise exception 'FALHA get inexistente'; end if;
+  if public.api_call(k, 'orders.get', '{"id":"nao-e-uuid"}')->>'error' <> 'invalid' then raise exception 'FALHA parametro'; end if;
+  r := public.api_call(k, 'menu.get');
+  if jsonb_array_length(r->'data') < 1 then raise exception 'FALHA cardápio'; end if;
+  r := public.api_call(k, 'customers.list', '{"limit":3}');
+  if jsonb_array_length(r->'data') < 1 or r->'data'->0->>'phone' is null then raise exception 'FALHA clientes'; end if;
+  if public.api_call(k, 'nada.disso')->>'error' <> 'not_found' then raise exception 'FALHA op'; end if;
+  -- chave só de leitura e presa a uma loja
+  a := public.api_auth(encode(extensions.digest(current_setting('test.apikey2'), 'sha256'), 'hex'));
+  if public.api_call((a->>'key_id')::uuid, 'orders.status', jsonb_build_object('id', current_setting('test.apiorder'), 'status', 'preparing'))->>'error' <> 'forbidden' then raise exception 'FALHA escopo leitura'; end if;
+  if public.api_call((a->>'key_id')::uuid, 'customers.list')->>'error' <> 'forbidden' then raise exception 'FALHA escopo clientes'; end if;
+  -- limite de 120 chamadas por minuto
+  for i in 1..125 loop a := public.api_auth(encode(extensions.digest(current_setting('test.apikey2'), 'sha256'), 'hex')); end loop;
+  if a->>'error' <> 'rate_limited' then raise exception 'FALHA limite %', a; end if;
+end $$;
+-- mudar status pela API usa as regras do painel
+do $$ declare r jsonb; begin
+  r := public.api_call(current_setting('test.apikeyid')::uuid, 'orders.status',
+    jsonb_build_object('id', current_setting('test.apiorder'), 'status', case when (select status from public.orders where id = current_setting('test.apiorder')::uuid) = 'pending' then 'preparing' else 'ready' end));
+  if r->>'error' is not null then raise exception 'FALHA status %', r; end if;
+  perform set_config('test.apistatus', r->'data'->>'status', false);
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare r jsonb; begin
+  r := public.api_call(current_setting('test.apikeyid')::uuid, 'orders.status', jsonb_build_object('id', current_setting('test.apiorder'), 'status', 'pending'));
+  if r->>'error' <> 'invalid' then raise exception 'FALHA transição inválida %', r; end if;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare r jsonb; begin
+  r := public.api_call(current_setting('test.apikeyid')::uuid, 'orders.status', jsonb_build_object('id', current_setting('test.apiorder'), 'status', 'cancelled'));
+  if r->>'error' <> 'invalid' or r->>'message' not like '%motivo%' then raise exception 'FALHA cancelar sem motivo %', r; end if;
+end $$;
+reset role;
+do $$ declare d public.webhook_deliveries; begin
+  if (select actor_id from public.order_events where order_id = current_setting('test.apiorder')::uuid order by created_at desc limit 1) <> '11111111-1111-1111-1111-111111111111' then
+    raise exception 'FALHA autor do status'; end if;
+  select * into d from public.webhook_deliveries where event = 'order.status_changed' and payload->'data'->'order'->>'id' = current_setting('test.apiorder');
+  if not found or d.payload->'data'->>'previous_status' is null or d.payload->'data'->'order'->>'status' <> current_setting('test.apistatus') then raise exception 'FALHA webhook status %', d.payload; end if;
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare r jsonb; p uuid := current_setting('test.pid')::uuid; begin
+  -- esgotado (geral) e de volta; preço só de uma loja
+  r := public.api_call(current_setting('test.apikeyid')::uuid, 'products.update', jsonb_build_object('id', p, 'available', false));
+  if (select paused_until from public.products where id = p) is null then raise exception 'FALHA esgotar'; end if;
+  perform public.api_call(current_setting('test.apikeyid')::uuid, 'products.update', jsonb_build_object('id', p, 'available', true));
+  if (select paused_until from public.products where id = p) is not null then raise exception 'FALHA voltar'; end if;
+  r := public.api_call(current_setting('test.apikeyid')::uuid, 'products.update', jsonb_build_object('id', p, 'unit_id', current_setting('test.funit'), 'price_cents', 4321));
+  if (select price_cents from public.product_unit_overrides where product_id = p and unit_id = current_setting('test.funit')::uuid) <> 4321 then raise exception 'FALHA preço loja'; end if;
+  if public.api_call(current_setting('test.apikeyid')::uuid, 'products.update', jsonb_build_object('id', p, 'price_cents', -5))->>'error' <> 'invalid' then raise exception 'FALHA preço negativo'; end if;
+  delete from public.product_unit_overrides where product_id = p and unit_id = current_setting('test.funit')::uuid and price_cents = 4321;
+  -- fila de entrega
+  r := public.webhook_jobs(50);
+  if jsonb_array_length(r) < 2 or r->0->>'secret' !~ '^whsec_' or r->0->>'url' <> 'https://hooks.example.com/Recebe/AbC123' or r->0->'payload'->>'id' is null then raise exception 'FALHA jobs %', r; end if;
+  if jsonb_array_length(public.webhook_jobs(50)) <> 0 then raise exception 'FALHA job duplicado'; end if;
+  perform public.webhook_job_result((r->0->>'id')::bigint, false, 500, 'erro do servidor');
+  perform public.webhook_job_result((r->1->>'id')::bigint, true, 200, null);
+  if (select status from public.webhook_deliveries where id = (r->0->>'id')::bigint) <> 'queued'
+     or (select next_attempt_at from public.webhook_deliveries where id = (r->0->>'id')::bigint) < now() + interval '50 seconds' then raise exception 'FALHA nova tentativa'; end if;
+end $$;
+reset role;
+-- 50 falhas seguidas desligam o endpoint
+do $$ begin
+  update public.webhook_endpoints set failures = 49 where id = current_setting('test.whid')::uuid;
+  update public.webhook_deliveries set next_attempt_at = now() where endpoint_id = current_setting('test.whid')::uuid and status = 'queued';
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare r jsonb; begin
+  r := public.webhook_jobs(1);
+  perform public.webhook_job_result((r->0->>'id')::bigint, false, 404, 'not found');
+  if (select active from public.webhook_endpoints where id = current_setting('test.whid')::uuid) then raise exception 'FALHA desligar endpoint'; end if;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.wt')::uuid; r jsonb; begin
+  begin perform public.webhook_test(current_setting('test.whid')::uuid); raise exception 'FALHA teste desligado'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.webhook_save(t, current_setting('test.whid')::uuid, '{"active":true}');
+  perform public.webhook_test(current_setting('test.whid')::uuid);
+  r := public.webhook_save(t, current_setting('test.whid')::uuid, '{"rotate_secret":true}');
+  if r->>'secret' !~ '^whsec_' then raise exception 'FALHA girar segredo'; end if;
+  r := public.api_overview(t);
+  if not exists (select 1 from jsonb_array_elements(r->'deliveries') x where x->>'event' = 'ping') then raise exception 'FALHA ping'; end if;
+  perform public.api_key_revoke(current_setting('test.apikeyid')::uuid);
+  perform public.webhook_delete(current_setting('test.whid')::uuid);
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ begin
+  if public.api_auth(encode(extensions.digest(current_setting('test.apikey'), 'sha256'), 'hex'))->>'error' <> 'invalid_key' then raise exception 'FALHA revogada'; end if;
+end $$;
+reset role;
+select 'API OK' as resultado;

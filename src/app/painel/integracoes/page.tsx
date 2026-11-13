@@ -8,6 +8,7 @@ import { errorMessage } from "@/lib/format";
 import { IfoodCard } from "./ifood";
 import { LogisticsCard } from "./logistics";
 import { ErpCard } from "./erp";
+import { ApiCard } from "./api";
 
 type Conn = {
   id: string; provider: string; display_name: string; merchant_id: string; app_id: string | null; client_id: string | null;
@@ -129,6 +130,7 @@ export default function Integracoes() {
       <IfoodCard />
       <LogisticsCard />
       <ErpCard />
+      <ApiCard />
 
       <div className="grid gap-4 lg:grid-cols-2">
         {PROVIDERS.map((p) => {
