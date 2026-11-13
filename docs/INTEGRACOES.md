@@ -337,3 +337,27 @@ Painel: **Marketing › Carrinhos**. Desligada por padrão.
   3. **Lista no painel**: botão "Enviar pelo WhatsApp" com a mensagem pronta, pelo WhatsApp da loja.
 - **Regras**: um lembrete por telefone dentro da frequência do Marketing. Quem cancelou as ofertas não recebe. Sacola sem resposta encerra em 24 h.
 - **Resultado**: um pedido do mesmo telefone em até 72 h depois do lembrete conta como recuperado. Antes do lembrete, conta como "pediu sem precisar". O painel mostra sacolas guardadas, lembretes, links abertos, recuperados e vendas recuperadas (pedidos cancelados não entram).
+
+## API pública e webhooks
+
+Painel: **Integrações › API e webhooks** (só o dono). Documentação pública: `/desenvolvedores`. Função: `api`.
+
+### Chaves de API
+- **Formato**: `dmf_` + 48 hex. Só o hash SHA-256 fica no banco e a chave aparece uma vez.
+- **Limites**: até 10 chaves ativas por conta e 120 chamadas por minuto por chave.
+- **Escopos**: `orders:read`, `orders:write`, `menu:read`, `menu:write`, `customers:read`. A chave pode ficar presa a uma loja.
+- **A chave age em nome do dono que a criou.** A troca de status chama `set_order_status` com as mesmas regras e efeitos do painel (estoque, fidelidade, fiscal, avisos), e o histórico do pedido registra o dono como autor. Se o dono sair da conta, a chave para de funcionar.
+- **Endpoints** (`/functions/v1/api/v1`):
+  - `GET /me`
+  - `GET /orders` e `GET /orders/{id}`
+  - `POST /orders/{id}/status`
+  - `GET /menu`
+  - `PATCH /products/{id}`: esgotar ou mudar preço, geral ou por loja
+  - `GET /customers`
+- Sem CORS: a chave é para servidor.
+
+### Webhooks
+- **Eventos**: `order.created`, `order.status_changed` (com `previous_status`), `order.paid`, além de `ping` de teste.
+- **Assinatura**: `Domma-Signature: t=<unix>,v1=<hmac-sha256(segredo, "t.corpo")>`. O segredo `whsec_…` fica no Vault, aparece uma vez e pode ser trocado.
+- **Endereços aceitos**: só `https` público. IP, localhost, `.local` e `.internal` são recusados no banco, e o worker confere o DNS (sem rede interna) e não segue redirecionamentos.
+- **Novas tentativas**: 1 min, 5 min, 30 min, 2 h e 6 h. Depois de 50 falhas seguidas o endpoint é desligado. O cron `domma-webhooks` roda a cada minuto, e o histórico fica 30 dias.
