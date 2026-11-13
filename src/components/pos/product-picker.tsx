@@ -3,12 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { Modal } from "@/components/ui";
 import { brl } from "@/lib/format";
+import { cacheGet, cacheSet, isNetworkError } from "@/lib/offline/pos-queue";
 
 export type PosOption = { id: string; name: string; price_cents: number };
 export type PosGroup = { id: string; name: string; min: number; max: number; allow_repeat: boolean; price_rule: "sum" | "max" | "avg"; options: PosOption[] };
 export type PosProduct = { id: string; category_id: string; name: string; description: string | null; image_url: string | null; price_cents: number; available: boolean; groups: PosGroup[] };
 export type PosCategory = { id: string; name: string };
-export type PosCatalog = { loading: boolean; error: string; categories: PosCategory[]; products: PosProduct[]; reload: () => void };
+export type PosCatalog = { loading: boolean; error: string; categories: PosCategory[]; products: PosProduct[]; reload: () => void; cachedAt?: string };
 export type PosLineOption = { option_id: string; name: string; price_cents: number; quantity: number; group: string };
 export type PosLine = { key: string; product_id: string; name: string; quantity: number; unit_price_cents: number; notes: string; options: PosLineOption[] };
 
@@ -43,7 +44,14 @@ export function usePosCatalog(tenantId: string, unitId: string, channel: "counte
       sb.from("product_unit_overrides").select("product_id, price_cents, available").eq("unit_id", unitId),
     ]);
     const err = cats.error ?? prods.error ?? groups.error ?? opts.error ?? links.error ?? ovs.error;
-    if (err) { setState((s) => ({ ...s, loading: false, error: err.message })); return; }
+    const ck = `pos_catalog:${unitId}:${channel}`;
+    if (err) {
+      // sem internet: usa o último cardápio salvo neste aparelho
+      const hit = isNetworkError(err) ? cacheGet<{ products: PosProduct[]; categories: PosCategory[] }>(ck) : null;
+      if (hit) { setState({ loading: false, error: "", ...hit.data, cachedAt: hit.at }); return; }
+      setState((s) => ({ ...s, loading: false, error: err.message }));
+      return;
+    }
     type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
     const gmap = new Map<string, PosGroup>((groups.data as Row[]).map((g) => [g.id, {
       id: g.id, name: g.name, min: g.min_select, max: g.max_select, allow_repeat: g.allow_repeat, price_rule: g.price_rule,
@@ -61,7 +69,9 @@ export function usePosCatalog(tenantId: string, unitId: string, channel: "counte
       };
     });
     const used = new Set(products.map((p) => p.category_id));
-    setState({ loading: false, error: "", products, categories: (cats.data as Row[]).filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name })) });
+    const categories = (cats.data as Row[]).filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name }));
+    cacheSet(ck, { products, categories });
+    setState({ loading: false, error: "", products, categories });
   }, [tenantId, unitId, channel]);
   useEffect(() => { load(); }, [load]);
   return { ...state, reload: load };

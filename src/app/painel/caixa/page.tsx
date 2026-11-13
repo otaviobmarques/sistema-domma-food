@@ -7,6 +7,9 @@ import { brl, errorMessage, parseBRL } from "@/lib/format";
 import { diffClass, type CashStatus } from "./types";
 import { Pos } from "./pos";
 import { Movement } from "./movement";
+import { OfflineBar } from "./offline-bar";
+import { cacheGet, cacheSet, isNetworkError, usePosQueue } from "@/lib/offline/pos-queue";
+import { registerSW } from "@/lib/pwa";
 
 export default function CaixaPage() {
   const { unit, role } = usePanel();
@@ -16,13 +19,22 @@ export default function CaixaPage() {
   const [float, setFloat] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!allowed) return;
-    const { data, error } = await supabaseBrowser().rpc("cash_status", { p_unit_id: unit.id });
-    if (error) setErr(errorMessage(error)); else { setErr(""); setStatus(data as CashStatus); }
+    const { data, error } = await supabaseBrowser().rpc("cash_status", { p_unit_id: unit.id }).abortSignal(AbortSignal.timeout(10_000));
+    if (!error) { setErr(""); setCachedAt(null); setStatus(data as CashStatus); cacheSet(`cash_status:${unit.id}`, data); return; }
+    // sem internet: mostra o último estado salvo neste aparelho e deixa vender se o caixa estava aberto
+    const hit = isNetworkError(error) ? cacheGet<CashStatus>(`cash_status:${unit.id}`) : null;
+    if (hit) { setErr(""); setCachedAt(hit.at); setStatus((cur) => cur ?? hit.data); }
+    else setErr(isNetworkError(error) ? "Sem internet. Este aparelho ainda não tem o caixa salvo: abra o caixa com internet pelo menos uma vez." : errorMessage(error));
   }, [unit.id, allowed]);
+  const queue = usePosQueue(unit.id, load);
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [load]);
+  // guarda a tela do caixa no aparelho para abrir mesmo sem internet
+  useEffect(() => { if (allowed) void registerSW(); }, [allowed]);
+  useEffect(() => { if (queue.online) void load(); }, [queue.online, load]);
 
   if (!allowed) return <div className="card"><p>O caixa é acessado pelo dono, gerente ou operador de caixa.</p></div>;
 
@@ -50,13 +62,14 @@ export default function CaixaPage() {
           </div>
         )}
       </div>
+      {allowed && <OfflineBar queue={queue} netDown={!!cachedAt} canDiscard={role === "owner" || role === "manager"} cachedAt={cachedAt} />}
       {(!status || !status.open) && <Alert>{err}</Alert>}
 
       {!status ? <p className="text-sm text-zinc-500">Carregando...</p> : status.open ? (
         // os dois ficam montados para não perder a venda em andamento ao trocar de aba
         <>
-          <div hidden={tab !== "pdv"}><Pos onSold={load} /></div>
-          <div hidden={tab !== "mov"}><Movement status={status} onChange={load} /></div>
+          <div hidden={tab !== "pdv"}><Pos onSold={load} queue={queue} sessionId={status.id} netDown={!!cachedAt} /></div>
+          <div hidden={tab !== "mov"}><Movement status={status} onChange={load} offline={!queue.online || !!cachedAt} pending={queue.pending.length} /></div>
         </>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">

@@ -10,7 +10,7 @@ type Open = Extract<CashStatus, { open: true }>;
 type CloseResult = { expected: Totals; counted: Partial<Record<Method, number>>; difference_cents: number };
 const KIND = { sale: "Venda", supply: "Suprimento", withdrawal: "Sangria", credit_payment: "Receb. fiado" } as const;
 
-export function Movement({ status, onChange }: { status: Open; onChange: () => void }) {
+export function Movement({ status, onChange, offline = false, pending = 0 }: { status: Open; onChange: () => void; offline?: boolean; pending?: number }) {
   const { unit } = usePanel();
   const sb = supabaseBrowser();
   const [move, setMove] = useState<null | "supply" | "withdrawal">(null);
@@ -52,11 +52,17 @@ export function Movement({ status, onChange }: { status: Open; onChange: () => v
           {status.opened_by ? <> por <b>{status.opened_by}</b></> : null} · fundo de troco {brl(status.opening_float_cents)}
         </p>
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" onClick={() => { setErr(""); setMove("supply"); }}>+ Suprimento</button>
-          <button className="btn-secondary" onClick={() => { setErr(""); setMove("withdrawal"); }}>− Sangria</button>
-          <button className="btn-danger" onClick={() => { setErr(""); setResult(null); setClosing(true); }}>Fechar caixa</button>
+          <button className="btn-secondary" disabled={offline} onClick={() => { setErr(""); setMove("supply"); }}>+ Suprimento</button>
+          <button className="btn-secondary" disabled={offline} onClick={() => { setErr(""); setMove("withdrawal"); }}>− Sangria</button>
+          <button className="btn-danger" disabled={offline || pending > 0} onClick={() => { setErr(""); setResult(null); setClosing(true); }}>Fechar caixa</button>
         </div>
       </div>
+      {offline ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">Sem internet: os valores abaixo são da última atualização. Suprimento, sangria e fechamento voltam quando a conexão voltar.</p>
+      ) : pending > 0 && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-200">
+          {pending === 1 ? "Há 1 venda feita sem internet ainda não enviada." : `Há ${pending} vendas feitas sem internet ainda não enviadas.`} Envie antes de fechar o caixa, para a conferência bater.</p>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         <div className="card col-span-2 md:col-span-1"><p className="text-xs font-medium text-zinc-500">Vendas ({e.sales_count})</p><p className="mt-1 text-xl font-bold tabular-nums">{brl(e.sales_total)}</p></div>
