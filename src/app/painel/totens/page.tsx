@@ -5,9 +5,11 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { canManage, usePanel } from "@/lib/panel/context";
 import { Alert, Empty, Modal, Toggle } from "@/components/ui";
 import { errorMessage } from "@/lib/format";
+import { PointSetup } from "./point";
 
 type Totem = { id: string; name: string; active: boolean; allow_dine_in: boolean; allow_takeout: boolean; allow_pix: boolean;
-  allow_counter: boolean; auto_accept: boolean; last_seen_at: string | null; created_at: string };
+  allow_counter: boolean; auto_accept: boolean; last_seen_at: string | null; created_at: string;
+  allow_card: boolean; point_terminal_id: string | null };
 const BASE = "https://domma-food.vercel.app/totem/";
 const online = (t: Totem) => !!t.last_seen_at && Date.now() - new Date(t.last_seen_at).getTime() < 3 * 60_000;
 
@@ -55,7 +57,7 @@ export default function Totens() {
         <h1 className="h1">Totens de autoatendimento</h1>
         <p className="mt-1 max-w-3xl text-sm text-zinc-600">
           Transforme um tablet ou uma tela touch em totem: o cliente monta o pedido, escolhe comer aqui ou levar e paga por Pix na tela
-          ou no caixa. Os pedidos entram em Pedidos e no KDS como qualquer outro, com o selo do totem.
+          no caixa ou com cartão na maquininha Mercado Pago Point ao lado. Os pedidos entram em Pedidos e no KDS como qualquer outro, com o selo do totem.
         </p>
       </div>
       <Alert>{err}</Alert>
@@ -88,6 +90,10 @@ export default function Totens() {
                   </label>
                 ))}
               </div>
+              {role === "owner" || t.allow_card || t.point_terminal_id ? (
+                <PointSetup unitId={unit.id} totemName={t.name} terminalId={t.point_terminal_id} allowCard={t.allow_card}
+                  onSave={(p, ok) => update(t, p as Partial<Totem>, ok)} />
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <button className="btn-secondary" onClick={() => void rotate(t)}>{t.active ? "Gerar novo link" : "Reativar com novo link"}</button>
                 {t.active && <button className="text-sm text-red-700 hover:underline" onClick={() => { if (confirm(`Desativar "${t.name}"? Ele para de aceitar pedidos.`)) void update(t, { active: false }, "Totem desativado."); }}>Desativar</button>}
@@ -104,6 +110,9 @@ export default function Totens() {
           <li>Android: use “Fixar app” (Configurações › Segurança) para o cliente não sair do cardápio. iPad: Acesso Guiado (Acessibilidade).</li>
           <li>Computador com tela touch: abra o Chrome com <code className="rounded bg-zinc-100 px-1">--kiosk</code> e o link do totem.</li>
           <li>Pix na tela usa o Mercado Pago configurado em Pagamento online. Pedidos “pagar no caixa” aparecem em Pedidos com o botão Receber.</li>
+          <li>Cartão: vincule a maquininha Point à mesma conta Mercado Pago (app do Mercado Pago), busque-a aqui, ative o modo integrado e use no totem.
+            No Mercado Pago, em Suas integrações › Webhooks, marque também o evento “Order” no mesmo endereço do Pagamento online.
+            Se o cliente desistir ou o cartão for recusado, ele tenta de novo ou passa a pagar no caixa.</li>
           <li>Sem toque por 75 segundos, o totem pergunta se o cliente ainda está ali e recomeça sozinho.</li>
         </ol>
       </section>
