@@ -9,7 +9,9 @@ import type { Store, StoreProduct } from "./types";
 import { storeColor } from "./brand";
 import { LoyaltyBanner, RatingChip, useStoreExtras } from "./loyalty";
 import { ConsentBanner } from "./consent";
-import { InstallBanner, PastOrders } from "./app-install";
+import { InstallBanner, PastOrders, rebuildItems } from "./app-install";
+import { supabaseBrowser } from "@/lib/supabase/client";
+import { couponKey } from "@/lib/cart-recovery";
 import { funnel, trackEvent } from "@/lib/tracking";
 
 const TAG_LABEL: Record<string, string> = { novo: "Novo", vegano: "Vegano", picante: "Picante", vegetariano: "Vegetariano", "sem-gluten": "Sem glúten" };
@@ -24,6 +26,27 @@ export function StoreMenu({ store }: { store: Store }) {
   const [toast, setToast] = useState("");
   const { loyalty, reviews } = useStoreExtras(unit.slug);
   useEffect(() => { funnel(unit.slug, "visit"); }, [unit.slug]);
+
+  // link do lembrete de carrinho (?carrinho=...): refaz a sacola com os preços de hoje
+  const { add: cartAdd, clear: cartClear, ready: cartReady } = cart;
+  useEffect(() => {
+    if (!cartReady) return;
+    const tok = new URLSearchParams(window.location.search).get("carrinho");
+    if (!tok || !/^[a-f0-9]{32}$/.test(tok)) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    void (async () => {
+      const { data } = await supabaseBrowser().rpc("cart_restore", { p_slug: unit.slug, p_token: tok });
+      const r = data as { items: Parameters<typeof rebuildItems>[0]["items"]; coupon_code: string | null } | null;
+      if (!r) { setToast("Esse link de sacola expirou."); setTimeout(() => setToast(""), 3000); return; }
+      const { items, skipped } = rebuildItems({ items: r.items }, menu);
+      if (items.length) { cartClear(); items.forEach((i) => cartAdd(i)); setCartOpen(true); }
+      if (r.coupon_code) { try { sessionStorage.setItem(couponKey(unit.slug), r.coupon_code); } catch { /* ignora */ } }
+      const msg = !items.length ? "Os itens da sua sacola não estão disponíveis agora"
+        : r.coupon_code ? `Sua sacola está de volta. O cupom ${r.coupon_code} já vai aplicado.`
+        : skipped.length ? `Sua sacola voltou, menos: ${skipped.join(", ")}` : "Sua sacola está de volta";
+      setToast(msg); setTimeout(() => setToast(""), 4000);
+    })();
+  }, [cartReady, cartAdd, cartClear, unit.slug, menu]);
 
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const filtered = useMemo(() => {

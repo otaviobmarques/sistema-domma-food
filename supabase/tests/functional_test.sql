@@ -1994,3 +1994,146 @@ do $$ begin
 end $$;
 reset role;
 select 'APP DO CLIENTE OK' as resultado;
+
+-- =====================================================================
+-- RECUPERAÇÃO DE CARRINHO
+-- =====================================================================
+reset role;
+do $$ declare t uuid := current_setting('test.wt')::uuid; v_cust uuid; begin
+  insert into public.coupons (tenant_id, code, kind, value) values (t, 'VOLTA10', 'percent', 10) on conflict do nothing;
+  -- cliente conhecido com aparelho reconhecido (token 'aparelho-teste-1')
+  select id into v_cust from public.customers where tenant_id = t and phone = '31966665555';
+  insert into public.customer_devices (token_hash, tenant_id, customer_id)
+  values (encode(extensions.digest('aparelho-teste-1', 'sha256'), 'hex'), t, v_cust) on conflict do nothing;
+  insert into public.marketing_settings (tenant_id) values (t) on conflict do nothing;
+  update public.marketing_settings set wa_enabled = true, send_from_hour = 0, send_to_hour = 24 where tenant_id = t;
+  -- assinatura de push já existente deste "aparelho"
+  insert into public.push_subscriptions (endpoint, p256dh, auth)
+  values ('https://fcm.googleapis.com/fcm/send/carrinho-teste', 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', 'BTBZMqHH6r4Tts7J_aSIgg');
+end $$;
+set role anon;
+do $$ begin
+  if public.cart_recovery_on('bella-massa') then raise exception 'FALHA ligado antes'; end if;
+  -- desligado: não guarda nada
+  if public.cart_snapshot('bella-massa', md5('x'), jsonb_build_object('opt_in', true, 'phone', '31900000001',
+     'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid'), 'quantity', 1)))) then raise exception 'FALHA guardou desligado'; end if;
+end $$;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.wt')::uuid; begin
+  begin perform public.cart_save_settings(t, '{"message":"Sem link aqui, desculpe"}'); raise exception 'FALHA sem link'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.cart_save_settings(t, jsonb_build_object('coupon_id', gen_random_uuid())); raise exception 'FALHA cupom'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.cart_save_settings(t, jsonb_build_object('enabled', true, 'delay_min', 20, 'template_name', 'carrinho_lembrete',
+    'template_params', jsonb_build_array('nome', 'link', 'cupom'),
+    'coupon_id', (select id from public.coupons where tenant_id = t and code = 'VOLTA10')));
+end $$;
+reset role;
+set role anon;
+do $$ declare it jsonb := jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid'), 'quantity', 2),
+    jsonb_build_object('product_id', gen_random_uuid(), 'quantity', 1)); i int; r jsonb;
+begin
+  if not public.cart_recovery_on('bella-massa') then raise exception 'FALHA ligado'; end if;
+  -- sem aceite de ofertas: não guarda
+  if public.cart_snapshot('bella-massa', md5('a1'), jsonb_build_object('opt_in', false, 'phone', '31900000001', 'items', it)) then raise exception 'FALHA sem aceite'; end if;
+  if public.cart_snapshot('bella-massa', 'token-ruim', jsonb_build_object('opt_in', true, 'phone', '31900000001', 'items', it)) then raise exception 'FALHA token'; end if;
+  -- cliente conhecido no aparelho reconhecido → verificado
+  if not public.cart_snapshot('bella-massa', md5('v1'), jsonb_build_object('opt_in', true, 'phone', '(31) 96666-5555', 'name', 'App Teste',
+    'device_token', 'aparelho-teste-1', 'subtotal_cents', 10980, 'items', it)) then raise exception 'FALHA verificado'; end if;
+  -- telefone qualquer (não verificado), sem e com push
+  perform public.cart_snapshot('bella-massa', md5('m1'), jsonb_build_object('opt_in', true, 'phone', '31900000001', 'name', 'Manual Um', 'items', it));
+  perform public.cart_snapshot('bella-massa', md5('m2'), jsonb_build_object('opt_in', true, 'phone', '31900000002', 'name', 'Manual Dois', 'items', it));
+  perform public.cart_snapshot('bella-massa', md5('p1'), jsonb_build_object('opt_in', true, 'phone', '31900000003', 'items', it,
+    'push_endpoint', 'https://fcm.googleapis.com/fcm/send/carrinho-teste'));
+  -- desmarcar o aceite apaga
+  perform public.cart_snapshot('bella-massa', md5('d1'), jsonb_build_object('opt_in', true, 'phone', '31900000004', 'items', it));
+  perform public.cart_snapshot('bella-massa', md5('d1'), jsonb_build_object('opt_in', false, 'phone', '31900000004', 'items', it));
+  -- limite por telefone (5 por dia)
+  for i in 1..6 loop
+    perform public.cart_snapshot('bella-massa', md5('lim' || i), jsonb_build_object('opt_in', true, 'phone', '31900000009', 'items', it));
+  end loop;
+  r := public.cart_restore('bella-massa', md5('v1'));
+  if jsonb_array_length(r->'items') <> 1 or (r->'items'->0->>'quantity')::int <> 2 then raise exception 'FALHA restore %', r; end if;
+  if public.cart_restore('outra-loja', md5('v1')) is not null then raise exception 'FALHA restore outra loja'; end if;
+  begin perform public.cart_wa_jobs(10); raise exception 'FALHA anon jobs'; exception when insufficient_privilege then null; end;
+  begin perform 1 from public.abandoned_carts; raise exception 'FALHA anon lê'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ declare a public.abandoned_carts; begin
+  select * into a from public.abandoned_carts where token = md5('v1');
+  if not a.verified or a.customer_id is null or a.phone <> '31966665555' or a.item_count <> 2 then raise exception 'FALHA dados verificado %', a; end if;
+  if (select verified from public.abandoned_carts where token = md5('m1')) then raise exception 'FALHA m1 verificado'; end if;
+  if (select push_subscription_id from public.abandoned_carts where token = md5('p1')) is null then raise exception 'FALHA push vinculado'; end if;
+  if exists (select 1 from public.abandoned_carts where token = md5('d1')) then raise exception 'FALHA desmarcar'; end if;
+  if (select count(*) from public.abandoned_carts where phone = '31900000009') <> 5 then raise exception 'FALHA limite telefone'; end if;
+  -- antes do prazo: nada acontece
+  perform private.cart_tick();
+  if exists (select 1 from public.abandoned_carts where status <> 'open') then raise exception 'FALHA lembrou cedo'; end if;
+  update public.abandoned_carts set updated_at = now() - interval '25 minutes';
+  perform private.cart_tick();
+  select * into a from public.abandoned_carts where token = md5('v1');
+  if a.status <> 'reminded' or a.channel <> 'whatsapp_api' or a.wa_status <> 'queued' or a.coupon_code <> 'VOLTA10'
+     or a.wa_params->>1 not like '%/loja/bella-massa?carrinho=' || md5('v1') or a.wa_params->>2 <> 'VOLTA10' then raise exception 'FALHA whatsapp %', a; end if;
+  select * into a from public.abandoned_carts where token = md5('p1');
+  if a.status <> 'reminded' or a.channel <> 'push' then raise exception 'FALHA canal push %', a.status; end if;
+  if not exists (select 1 from public.push_queue where event = 'cart' and payload->>'url' = '/loja/bella-massa?carrinho=' || md5('p1')) then raise exception 'FALHA fila push'; end if;
+  if (select status from public.abandoned_carts where token = md5('m1')) <> 'manual_pending' then raise exception 'FALHA manual'; end if;
+end $$;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; begin
+  j := public.cart_wa_jobs(10);
+  if jsonb_array_length(j) <> 1 or j->0->>'to' <> '5531966665555' or j->0->>'template' <> 'carrinho_lembrete' then raise exception 'FALHA jobs %', j; end if;
+  if jsonb_array_length(public.cart_wa_jobs(10)) <> 0 then raise exception 'FALHA job duplicado'; end if;
+  perform public.cart_wa_result((j->0->>'id')::uuid, true, 'wamid.teste', null);
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare ov jsonb; m jsonb; begin
+  ov := public.cart_overview(current_setting('test.wt')::uuid);
+  select x into m from jsonb_array_elements(ov->'carts') x where x->>'name' = 'Manual Um';
+  if m->>'manual_text' not like 'Oi Manual! %/loja/bella-massa?carrinho=%' then raise exception 'FALHA texto manual %', m->>'manual_text'; end if;
+  perform public.cart_manual_mark((m->>'id')::uuid, true);
+  select x into m from jsonb_array_elements(ov->'carts') x where x->>'name' = 'Manual Dois';
+  perform public.cart_manual_mark((m->>'id')::uuid, false);
+  begin perform public.cart_manual_mark((m->>'id')::uuid, true); raise exception 'FALHA marcar de novo'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+-- pedidos: depois do lembrete conta como recuperado
+set role anon;
+do $$ begin
+  perform public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+    'customer', jsonb_build_object('name','App Teste','phone','31966665555'),
+    'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 2))));
+  perform public.place_order(jsonb_build_object('slug','bella-massa','type','pickup','payment_method','cash',
+    'customer', jsonb_build_object('name','Lim Teste','phone','31900000009'),
+    'items', jsonb_build_array(jsonb_build_object('product_id', current_setting('test.pid')::uuid, 'quantity', 1))));
+end $$;
+reset role;
+do $$ declare a public.abandoned_carts; begin
+  select * into a from public.abandoned_carts where token = md5('v1');
+  if a.status <> 'recovered' or a.order_id is null or a.order_total_cents <= 0 then raise exception 'FALHA recuperado %', a.status; end if;
+  if exists (select 1 from public.abandoned_carts where phone = '31900000009' and status <> 'converted') then raise exception 'FALHA convertido'; end if;
+  -- mais de 24 h sem resposta: encerra
+  update public.abandoned_carts set created_at = now() - interval '25 hours' where token = md5('p1');
+  insert into public.abandoned_carts (tenant_id, unit_id, token, phone, items) select tenant_id, unit_id, md5('velho'), '31900000005', items
+    from public.abandoned_carts where token = md5('p1');
+  update public.abandoned_carts set created_at = now() - interval '25 hours' where token = md5('velho');
+  perform private.cart_tick();
+  if (select status from public.abandoned_carts where token = md5('velho')) <> 'expired' then raise exception 'FALHA expirar'; end if;
+end $$;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare s jsonb; begin
+  s := public.cart_overview(current_setting('test.wt')::uuid)->'stats';
+  if (s->>'recovered')::int <> 1 or (s->>'recovered_cents')::int <= 0 or (s->>'converted')::int <> 5 or (s->>'reminded')::int < 3 then raise exception 'FALHA stats %', s; end if;
+end $$;
+set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
+do $$ begin
+  begin perform public.cart_overview(current_setting('test.wt')::uuid); raise exception 'FALHA cozinha'; exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'CARRINHO OK' as resultado;

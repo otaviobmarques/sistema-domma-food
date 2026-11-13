@@ -9,10 +9,11 @@ import { Automations } from "./automations";
 import { WhatsAppSettings } from "./settings";
 import { StatusNotices } from "./status";
 import { TrackingSettings } from "./tracking";
+import { CartRecovery } from "./carts";
 import type { Segment, Settings } from "./shared";
 
-type Tab = "campaigns" | "automations" | "status" | "tracking" | "whatsapp";
-const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["status", "Avisos de pedido"], ["tracking", "Anúncios e métricas"], ["whatsapp", "WhatsApp"]];
+type Tab = "campaigns" | "automations" | "carts" | "status" | "tracking" | "whatsapp";
+const TABS: [Tab, string][] = [["campaigns", "Campanhas"], ["automations", "Automações"], ["carts", "Carrinhos"], ["status", "Avisos de pedido"], ["tracking", "Anúncios e métricas"], ["whatsapp", "WhatsApp"]];
 
 export default function Marketing() {
   const { tenantId, role } = usePanel();
@@ -57,6 +58,7 @@ export default function Marketing() {
       <Alert>{err}</Alert>
       {loaded && tab === "campaigns" && <Campaigns key={crmSeg ? "crm" : "std"} apiReady={apiReady} initialSeg={crmSeg} />}
       {loaded && tab === "automations" && <Automations apiReady={apiReady} freqDays={s?.frequency_days ?? 7} />}
+      {loaded && tab === "carts" && <CartRecovery />}
       {loaded && tab === "status" && <StatusNotices />}
       {loaded && tab === "tracking" && <TrackingSettings />}
       {loaded && tab === "whatsapp" && <WhatsAppSettings settings={s} onChanged={load} />}

@@ -324,3 +324,16 @@ O cardápio de cada loja funciona como app, sem loja de aplicativos e sem nada p
 - **Painel**: o card "App do cliente" em Configurações mostra os pedidos com avisos, os aparelhos e os avisos entregues ou com falha nos últimos 30 dias.
 
 Não há login por telefone: o cliente é reconhecido pelo aparelho (tokens dos pedidos e o cadastro salvo no checkout), sem custo de SMS.
+
+## Recuperação de carrinho
+
+Painel: **Marketing › Carrinhos**. Desligada por padrão.
+
+- **Quando a sacola é guardada**: no checkout, só se o cliente informou o WhatsApp e marcou "Quero receber ofertas" (o texto avisa que a loja pode lembrar uma vez). Sem aceite, nada é guardado, e desmarcar apaga o que havia. Ficam guardados os itens, o nome e o telefone.
+- **Lembrete**: depois do tempo escolhido (20 min a 6 h) sem pedido, o cron `domma-carts` (a cada 5 min) envia um único lembrete, respeitando o horário de envio do Marketing. O link `/loja/<slug>?carrinho=<token>` refaz a sacola com os preços de hoje e já aplica o cupom escolhido.
+- **Canais, em ordem**:
+  1. **WhatsApp oficial**: modelo de marketing aprovado, com as variáveis nome, loja, link, cupom e total. Só vai para clientes que já compraram e estão no mesmo aparelho reconhecido. Como o cardápio é público, isso impede usar a loja para mandar mensagem a telefones de terceiros.
+  2. **Notificação no aparelho**: só quando aquele aparelho já ativou os avisos ao acompanhar um pedido.
+  3. **Lista no painel**: botão "Enviar pelo WhatsApp" com a mensagem pronta, pelo WhatsApp da loja.
+- **Regras**: um lembrete por telefone dentro da frequência do Marketing. Quem cancelou as ofertas não recebe. Sacola sem resposta encerra em 24 h.
+- **Resultado**: um pedido do mesmo telefone em até 72 h depois do lembrete conta como recuperado. Antes do lembrete, conta como "pediu sem precisar". O painel mostra sacolas guardadas, lembretes, links abertos, recuperados e vendas recuperadas (pedidos cancelados não entram).

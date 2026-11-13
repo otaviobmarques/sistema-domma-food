@@ -8,6 +8,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { brl, formatPhone, onlyDigits, parseBRL, PAYMENT_LABEL } from "@/lib/format";
 import { Alert, Field } from "@/components/ui";
 import { useCart } from "@/components/store/cart";
+import { clearCartToken, couponKey, snapshotCart } from "@/lib/cart-recovery";
 import type { Store } from "@/components/store/types";
 import { storeColor } from "@/components/store/brand";
 import { fetchLoyalty, getDeviceToken, setDeviceToken, type LoyaltyInfo } from "@/components/store/loyalty";
@@ -59,6 +60,23 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
   const phoneDigits = onlyDigits(phone);
 
   useEffect(() => { setDevice(getDeviceToken(slug)); }, [slug]);
+  // cupom vindo do lembrete de carrinho
+  useEffect(() => {
+    try { const c = sessionStorage.getItem(couponKey(slug)); if (c) setCoupon(c); } catch { /* ignora */ }
+  }, [slug]);
+  // recuperação de carrinho: com aceite de ofertas e telefone, a sacola fica guardada para um lembrete
+  const [cartReminder, setCartReminder] = useState(false);
+  useEffect(() => {
+    void supabaseBrowser().rpc("cart_recovery_on", { p_slug: slug }).then(({ data }: { data: boolean | null }) => setCartReminder(data === true));
+  }, [slug]);
+  useEffect(() => {
+    if (!cartReminder || !cart.ready || !cart.items.length) return;
+    if (phoneDigits.length < 10 && optIn) return;
+    const t = setTimeout(() => {
+      void snapshotCart(slug, { name: name.trim(), phone: phoneDigits, optIn, deviceToken, items: cart.items, subtotal: cart.total });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [cartReminder, slug, name, phoneDigits, optIn, deviceToken, cart.ready, cart.items, cart.total]);
   // Fidelidade: consulta quando o telefone está completo
   useEffect(() => {
     if (phoneDigits.length < 10) { setLoyalty(null); return; }
@@ -161,6 +179,8 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
     funnel(slug, "order", placed.total_cents);
     trackEvent(store?.unit.tracking, { name: "purchase", items: trackItems, value_cents: placed.total_cents, order_id: placed.order_id });
     cart.clear();
+    clearCartToken(slug);
+    try { sessionStorage.removeItem(couponKey(slug)); } catch { /* ignora */ }
     router.replace(`/pedido/${(data as { token: string }).token}`);
   }
 
@@ -308,7 +328,7 @@ export default function CheckoutPage({ params }: { params: Promise<{ slug: strin
           )}
           <label className="flex items-start gap-2 text-xs text-zinc-600">
             <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={optIn} onChange={(e) => setOptIn(e.target.checked)} />
-            Quero receber ofertas e novidades de {u.name} pelo WhatsApp. Posso cancelar quando quiser. Seus dados são usados apenas para o pedido e, se autorizado, para comunicações da loja (LGPD).
+            Quero receber ofertas e novidades de {u.name} pelo WhatsApp. Posso cancelar quando quiser. Seus dados são usados apenas para o pedido e, se autorizado, para comunicações da loja (LGPD).{cartReminder ? " Se você não concluir o pedido, a loja pode lembrar você uma vez." : ""}
           </label>
           {optIn && (
             <Field label="Data de nascimento (opcional · ganhe um presente no aniversário)">
