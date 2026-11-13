@@ -7,6 +7,7 @@ export const metadata: Metadata = {
 };
 
 const BASE = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/api/v1`;
+const MCP = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/mcp`;
 
 function Code({ children }: { children: string }) {
   return <pre className="overflow-x-auto rounded-xl bg-zinc-900 p-4 text-[13px] leading-relaxed text-zinc-100"><code>{children}</code></pre>;
@@ -130,6 +131,34 @@ function verify(rawBody, header, secret) {
   return v1.length === expected.length && crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
 }`}</Code>
           <p className="text-sm text-zinc-700">Outros cabeçalhos: <code>Domma-Event</code> (tipo) e <code>Domma-Delivery</code> (id do evento). No painel dá para enviar um evento de teste (<code>ping</code>) e reenviar entregas que falharam.</p>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-xl font-extrabold">Assistentes de IA (MCP)</h2>
+          <p className="text-sm text-zinc-700">
+            O Domma Food tem um servidor <strong>MCP</strong> (Model Context Protocol): conecte o Claude, o Cursor ou outro app compatível e pergunte
+            &quot;como foram as vendas ontem?&quot;, &quot;quais pedidos estão em preparo?&quot; ou peça &quot;esgota a pizza de calabresa&quot;. Ele usa a mesma chave de API,
+            com as mesmas permissões: uma chave só de leitura não altera nada.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-zinc-700">
+            <li><strong>Ferramentas</strong>: info da conta, resumo de vendas, listar e ver pedidos (pelo número), mudar status, ver cardápio, buscar produto,
+              esgotar/voltar produto, alterar preço e listar clientes. Cada ferramenta só aparece se a chave tiver a permissão.</li>
+            <li><strong>Endereço</strong>: <code className="break-all">{MCP}</code> (HTTP, sem sessão), com <code>Authorization: Bearer dmf_…</code>.</li>
+            <li>Apps que só aceitam um endereço, como os conectores personalizados do Claude: use <code className="break-all">{MCP}/dmf_sua_chave</code>.
+              Esse endereço dá acesso à loja: guarde como senha e revogue a chave se vazar.</li>
+          </ul>
+          <p className="text-sm font-semibold">Claude Code</p>
+          <Code>{`claude mcp add --transport http domma-food ${MCP} \
+  --header "Authorization: Bearer dmf_sua_chave"`}</Code>
+          <p className="text-sm font-semibold">Apps com configuração em JSON (Cursor e outros)</p>
+          <Code>{`{
+  "mcpServers": {
+    "domma-food": {
+      "url": "${MCP}",
+      "headers": { "Authorization": "Bearer dmf_sua_chave" }
+    }
+  }
+}`}</Code>
         </section>
 
         <p className="border-t border-zinc-200 pt-6 text-xs text-zinc-500">Dúvidas sobre a integração? Fale com o suporte do Domma Food pelo painel.</p>
