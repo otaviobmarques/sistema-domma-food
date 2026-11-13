@@ -74,7 +74,7 @@ type PastItem = { product_id: string | null; name: string; quantity: number; not
 type PastOrder = { token: string; number: number; status: string; type: string; created_at: string; total_cents: number; items: PastItem[] };
 
 /** Remonta os itens de um pedido antigo com os preços e opções de hoje. Itens que mudaram ficam de fora. */
-export function rebuildItems(order: PastOrder, menu: StoreCategory[]): { items: CartItem[]; skipped: string[] } {
+export function rebuildItems(order: Pick<PastOrder, "items">, menu: StoreCategory[]): { items: CartItem[]; skipped: string[] } {
   const products = new Map(menu.flatMap((c) => (c.available_now ? c.products.filter((p) => p.available) : []).map((p) => [p.id, p] as const)));
   const items: CartItem[] = [];
   const skipped: string[] = [];

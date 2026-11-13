@@ -47,7 +47,7 @@ const errMsg = (d: Record<string, unknown>) => {
   return e ? `${e.code ?? ""} ${e.error_user_msg ?? e.message ?? ""}`.trim() : "Erro desconhecido";
 };
 
-type Job = { id: number; to: string; params: string[]; template: string; lang: string; phone_number_id: string; version: string; token: string };
+type Job = { id: number | string; to: string; params: string[]; template: string; lang: string; phone_number_id: string; version: string; token: string };
 
 async function sendTemplate(j: Job) {
   const body = {
@@ -71,6 +71,14 @@ async function worker(req: Request) {
   for (const j of (sjobs ?? []) as Job[]) {
     const r = await sendTemplate(j);
     await admin.rpc("status_job_result", { p_id: j.id, p_ok: r.ok, p_wa_id: r.waId, p_error: r.error });
+    if (r.ok) sent++; else failed++;
+  }
+  // 1b) lembretes de carrinho (a janela de horário já foi respeitada ao enfileirar)
+  const { data: cjobs, error: cerr } = await admin.rpc("cart_wa_jobs", { p_limit: 50 });
+  if (cerr) console.error(cerr);
+  for (const j of (cjobs ?? []) as Job[]) {
+    const r = await sendTemplate(j);
+    await admin.rpc("cart_wa_result", { p_id: j.id, p_ok: r.ok, p_wa_id: r.waId, p_error: r.error });
     if (r.ok) sent++; else failed++;
   }
   // 2) campanhas (respeitam a janela de envio da loja)
