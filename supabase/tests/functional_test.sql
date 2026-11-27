@@ -2644,3 +2644,205 @@ do $$ begin
 end $$;
 reset role;
 select 'REVENDAS OK' as resultado;
+
+-- =====================================================================
+-- ATENDENTE IA NO WHATSAPP
+-- =====================================================================
+reset role;
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; begin
+  insert into public.marketing_settings (tenant_id, wa_enabled, wa_phone_number_id) values (t, true, '5550001')
+  on conflict (tenant_id) do update set wa_enabled = true, wa_phone_number_id = '5550001';
+end $$;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+-- dono: sem IA da plataforma ainda
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; r jsonb; begin
+  r := public.ai_settings_get(t);
+  if (r->>'enabled')::boolean or (r->>'platform_available')::boolean or not (r->>'wa_enabled')::boolean then raise exception 'FALHA settings iniciais %', r; end if;
+  begin perform public.ai_settings_save(t, '{"enabled":true}'); raise exception 'FALHA ligou sem chave';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.ai_settings_save(t, '{}', 'chave-errada'); raise exception 'FALHA chave inválida';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_ai_save('{"enabled":true}'); raise exception 'FALHA dono no admin da IA';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- admin: chave da plataforma (só liga depois do teste)
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare r jsonb; begin
+  r := public.admin_ai_save('{"monthly_limit":3}', 'sk-ant-api03-PLATAFORMA0000000000000000abcd');
+  if r->>'api_key_hint' <> '…abcd' or (r->>'monthly_limit')::int <> 3 then raise exception 'FALHA admin salvar %', r; end if;
+  begin perform public.admin_ai_save('{"enabled":true}'); raise exception 'FALHA ligou sem testar';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if not public.ai_can_test('platform') then raise exception 'FALHA admin pode testar'; end if;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ begin
+  if public.ai_key_for_test('platform') <> 'sk-ant-api03-PLATAFORMA0000000000000000abcd' then raise exception 'FALHA chave para teste'; end if;
+  perform public.ai_key_test_result('platform', null, true, null);
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ begin
+  if not (public.admin_ai_save('{"enabled":true}')->>'enabled')::boolean then raise exception 'FALHA ligar plataforma'; end if;
+end $$;
+-- dono liga o atendente com a IA da plataforma; caixa não configura
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; r jsonb; begin
+  if public.ai_can_test('platform') then raise exception 'FALHA dono testa chave da plataforma'; end if;
+  r := public.ai_settings_save(t, '{"enabled":true,"instructions":"Pizza grande serve 3 pessoas."}');
+  if not (r->>'enabled')::boolean or (r->>'monthly_limit')::int <> 3 or r->>'unit_id' is null then raise exception 'FALHA ligar %', r; end if;
+  if not (public.inbox_overview(t)->>'ai_enabled')::boolean then raise exception 'FALHA overview ai_enabled'; end if;
+end $$;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';   -- caixa da loja A
+do $$ begin
+  begin perform public.ai_settings_save(current_setting('test.a_tenant')::uuid, '{"enabled":false}'); raise exception 'FALHA caixa configurou';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- cliente escreve duas mensagens seguidas: uma resposta só
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; c uuid; ids jsonb; ctx jsonb; r jsonb; begin
+  c := public.inbox_inbound(t, '5531988887777', 'Ana', 'wamid.ai1', 'text', 'Oi!', now());
+  perform public.inbox_inbound(t, '5531988887777', 'Ana', 'wamid.ai2', 'text', 'Vocês entregam no Savassi?', now());
+  perform set_config('test.aic', c::text, false);
+  if (select count(*) from public.ai_jobs where conversation_id = c and status = 'queued') <> 1 then raise exception 'FALHA juntar mensagens'; end if;
+  if public.ai_jobs_claim(5) <> '[]'::jsonb then raise exception 'FALHA pegou antes da espera'; end if;
+  update public.ai_jobs set run_after = now() - interval '1 second' where conversation_id = c;
+  ids := public.ai_jobs_claim(5);
+  if jsonb_array_length(ids) <> 1 then raise exception 'FALHA claim %', ids; end if;
+  ctx := public.ai_job_context((ids->>0)::bigint);
+  if ctx->>'api_key' <> 'sk-ant-api03-PLATAFORMA0000000000000000abcd' or ctx->>'source' <> 'platform'
+     or ctx->'store'->>'menu_url' not like '%/loja/bella-massa' or ctx->'store'->>'instructions' <> 'Pizza grande serve 3 pessoas.'
+     or jsonb_array_length(ctx->'messages') <> 2 or ctx->'customer'->>'name' <> 'Ana' or jsonb_array_length(ctx->'store'->'menu') < 1 then
+    raise exception 'FALHA contexto %', ctx - 'api_key'; end if;
+  r := public.ai_job_finish((ids->>0)::bigint, '{"reply":"Entregamos sim! Taxa de R$ 5,00.","source":"platform","usage":{"input_tokens":900,"output_tokens":40}}');
+  if r->>'message_id' is null then raise exception 'FALHA finish %', r; end if;
+  if not (select by_ai and status = 'queued' and direction = 'out' from public.wa_messages where id = (r->>'message_id')::bigint) then raise exception 'FALHA mensagem da IA'; end if;
+  if (select replies from public.ai_usage where tenant_id = t and source = 'platform') <> 1 then raise exception 'FALHA uso'; end if;
+  -- a mensagem da própria IA não cria outra tarefa
+  if exists (select 1 from public.ai_jobs where conversation_id = c and status = 'queued') then raise exception 'FALHA IA respondeu a si mesma'; end if;
+  -- cliente pede uma pessoa: a IA passa para a equipe e para de responder
+  perform public.inbox_inbound(t, '5531988887777', 'Ana', 'wamid.ai3', 'text', 'Quero falar com alguém, meu pedido veio errado', now());
+  update public.ai_jobs set run_after = now() - interval '1 second' where conversation_id = c and status = 'queued';
+  ids := public.ai_jobs_claim(5);
+  ctx := public.ai_job_context((ids->>0)::bigint);
+  r := public.ai_job_finish((ids->>0)::bigint, '{"reply":"Vou chamar a equipe.","handoff":true,"reason":"Pedido veio errado","source":"platform","usage":{"input_tokens":950,"output_tokens":30}}');
+  if not (select needs_human from public.wa_conversations where id = c) then raise exception 'FALHA passar para a equipe'; end if;
+  perform public.inbox_inbound(t, '5531988887777', 'Ana', 'wamid.ai4', 'text', 'Alô?', now());
+  if exists (select 1 from public.ai_jobs where conversation_id = c and status = 'queued') then raise exception 'FALHA IA respondeu com a equipe'; end if;
+  -- falha da IA: volta para a fila e, na 3ª, passa para a equipe
+  if public.ai_job_finish(999999, '{"error":"x"}') is not null then raise exception 'FALHA finish job inexistente'; end if;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ declare c uuid := current_setting('test.aic')::uuid; d jsonb; begin
+  d := public.inbox_open(c);
+  if not (d->'conversation'->>'needs_human')::boolean or d->'conversation'->>'ai_handoff_reason' <> 'Pedido veio errado'
+     or not exists (select 1 from jsonb_array_elements(d->'messages') m where (m->>'by_ai')::boolean) then raise exception 'FALHA inbox_open IA %', d->'conversation'; end if;
+  if (public.inbox_overview(current_setting('test.a_tenant')::uuid)->>'needs_human')::int < 1 then raise exception 'FALHA overview needs_human'; end if;
+  perform public.ai_conversation_set(c, 'auto');
+  if (public.inbox_open(c)->'conversation'->>'needs_human')::boolean then raise exception 'FALHA devolver para a IA'; end if;
+  -- a equipe responde: a IA sai da conversa
+  perform public.inbox_queue_reply(c, 'Oi Ana, aqui é a Bia. Já vamos resolver.');
+  if (select ai_paused_until < now() + interval '11 hours' from public.wa_conversations where id = c) then raise exception 'FALHA pausa pela equipe'; end if;
+  begin perform public.ai_conversation_set(c, 'turbo'); raise exception 'FALHA modo inválido';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; c uuid := current_setting('test.aic')::uuid; c2 uuid; ids jsonb; begin
+  perform public.inbox_inbound(t, '5531988887777', 'Ana', 'wamid.ai5', 'text', 'Ok', now());
+  if exists (select 1 from public.ai_jobs where conversation_id = c and status = 'queued') then raise exception 'FALHA IA respondeu na pausa'; end if;
+  -- limite do mês (3): já usou 2; a 3ª passa, a 4ª vai para a equipe
+  c2 := public.inbox_inbound(t, '5531955554444', 'Bruno', 'wamid.ai6', 'text', 'Qual o horário?', now());
+  update public.ai_jobs set run_after = now() - interval '1 second' where conversation_id = c2;
+  ids := public.ai_jobs_claim(5);
+  perform public.ai_job_context((ids->>0)::bigint);
+  perform public.ai_job_finish((ids->>0)::bigint, '{"reply":"Abrimos às 18h.","source":"platform","usage":{}}');
+  perform public.inbox_inbound(t, '5531955554444', 'Bruno', 'wamid.ai7', 'text', 'E amanhã?', now());
+  update public.ai_jobs set run_after = now() - interval '1 second' where conversation_id = c2 and status = 'queued';
+  ids := public.ai_jobs_claim(5);
+  if public.ai_job_context((ids->>0)::bigint) is not null then raise exception 'FALHA passou do limite'; end if;
+  if not (select needs_human from public.wa_conversations where id = c2) then raise exception 'FALHA limite sem aviso à equipe'; end if;
+  -- falha: volta para a fila; na última tentativa passa para a equipe
+  update public.wa_conversations set needs_human = false where id = c2;
+  update public.ai_usage set replies = 0 where tenant_id = t;
+  perform public.inbox_inbound(t, '5531955554444', 'Bruno', 'wamid.ai8', 'text', 'Oi?', now());
+  update public.ai_jobs set run_after = now() - interval '1 second', attempts = 2 where conversation_id = c2 and status = 'queued';
+  ids := public.ai_jobs_claim(5);
+  perform public.ai_job_finish((ids->>0)::bigint, '{"error":"529 overloaded"}');
+  if (select status from public.ai_jobs where id = (ids->>0)::bigint) <> 'failed' or not (select needs_human from public.wa_conversations where id = c2) then
+    raise exception 'FALHA falha final'; end if;
+  -- teste no painel
+  if public.ai_preview_context(t)->>'source' <> 'platform' then raise exception 'FALHA preview'; end if;
+  perform public.ai_preview_usage(t, 'platform', '{"input_tokens":10}');
+end $$;
+-- chave própria: sem limite, só liga depois do teste
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; r jsonb; begin
+  r := public.ai_settings_save(t, '{}', 'sk-ant-api03-LOJAPROPRIA00000000000000wxyz');
+  if r->>'own_key_hint' <> '…wxyz' then raise exception 'FALHA chave própria %', r; end if;
+  begin perform public.ai_settings_save(t, '{"use_own_key":true,"enabled":true}'); raise exception 'FALHA própria sem teste';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if not public.ai_can_test('tenant', t) then raise exception 'FALHA dono testa a própria'; end if;
+end $$;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  if public.ai_can_test('tenant', current_setting('test.a_tenant')::uuid) then raise exception 'FALHA caixa testa chave'; end if;
+  begin perform public.ai_job_context(1); raise exception 'FALHA logado leu contexto';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+select public.ai_key_test_result('tenant', current_setting('test.a_tenant')::uuid, true, null);
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; r jsonb; begin
+  r := public.ai_settings_save(t, '{"use_own_key":true,"enabled":true}');
+  if not (r->>'use_own_key')::boolean or not (r->>'enabled')::boolean then raise exception 'FALHA ligar com a própria %', r; end if;
+end $$;
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; c uuid; ids jsonb; ctx jsonb; begin
+  update public.ai_usage set replies = 99 where tenant_id = t and source = 'platform';
+  c := public.inbox_inbound(t, '5531944443333', 'Caio', 'wamid.ai9', 'text', 'Tem pizza de calabresa?', now());
+  update public.ai_jobs set run_after = now() - interval '1 second' where conversation_id = c;
+  ids := public.ai_jobs_claim(5);
+  ctx := public.ai_job_context((ids->>0)::bigint);
+  if ctx->>'source' <> 'own' or ctx->>'api_key' <> 'sk-ant-api03-LOJAPROPRIA00000000000000wxyz' then raise exception 'FALHA chave própria no contexto'; end if;
+  perform public.ai_job_finish((ids->>0)::bigint, '{"reply":"Temos sim!","source":"own","usage":{"input_tokens":5}}');
+  if (select replies from public.ai_usage where tenant_id = t and source = 'own') <> 1 then raise exception 'FALHA uso próprio'; end if;
+end $$;
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare r jsonb; begin
+  perform public.admin_ai_tenant_limit(current_setting('test.a_tenant')::uuid, 50);
+  r := public.admin_ai_settings();
+  if not exists (select 1 from jsonb_array_elements(r->'tenants') x where x->>'tenant_id' = current_setting('test.a_tenant') and (x->>'monthly_limit')::int = 50 and (x->>'used_own')::int = 1) then
+    raise exception 'FALHA admin uso por loja %', r->'tenants'; end if;
+end $$;
+set role anon;
+do $$ begin
+  begin perform public.ai_settings_get(current_setting('test.a_tenant')::uuid); raise exception 'FALHA anon settings';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'ATENDENTE IA OK' as resultado;

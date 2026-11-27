@@ -6,13 +6,16 @@ import { canManage, usePanel } from "@/lib/panel/context";
 import { Alert, Empty, Modal } from "@/components/ui";
 import { brl, errorMessage, formatPhone } from "@/lib/format";
 import { localPhone, WaOrder, type Placed, type Prefill } from "./order";
+import { AiAttendant } from "./ai";
 
 type Conv = { id: string; wa_id: string; name: string | null; status: "open" | "closed"; unread: number; last_preview: string | null;
-  last_message_at: string; window_open: boolean; customer_id: string | null; orders_count: number | null };
-type Overview = { wa_enabled: boolean; unread: number; conversations: Conv[] };
-type Msg = { id: number; direction: "in" | "out"; kind: string; body: string | null; status: string; error: string | null; created_at: string; order_id: string | null };
+  last_message_at: string; window_open: boolean; customer_id: string | null; orders_count: number | null;
+  needs_human?: boolean; ai_handoff_reason?: string | null; ai_paused?: boolean };
+type Overview = { wa_enabled: boolean; unread: number; conversations: Conv[]; ai_enabled?: boolean; needs_human?: number };
+type Msg = { id: number; direction: "in" | "out"; kind: string; body: string | null; status: string; error: string | null; created_at: string; order_id: string | null; by_ai?: boolean };
 type Detail = {
-  conversation: { id: string; wa_id: string; name: string | null; status: "open" | "closed"; window_open: boolean; window_closes_at: string | null };
+  conversation: { id: string; wa_id: string; name: string | null; status: "open" | "closed"; window_open: boolean; window_closes_at: string | null;
+    needs_human?: boolean; ai_handoff_reason?: string | null; ai_paused_until?: string | null };
   customer: null | { id: string; name: string; phone: string; orders_count: number; total_spent_cents: number; last_order_at: string | null;
     cashback_cents: number; last_address: Record<string, string> | null;
     recent_orders: { id: string; number: number; status: string; total_cents: number; created_at: string; channel: string }[] };
@@ -42,7 +45,7 @@ export default function Atendimento() {
   const { tenantId, role, unit } = usePanel();
   const sb = supabaseBrowser();
   const [ov, setOv] = useState<Overview | null>(null);
-  const [filter, setFilter] = useState<"open" | "unread" | "closed">("open");
+  const [filter, setFilter] = useState<"open" | "unread" | "human" | "closed">("open");
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<string | null>(null);
   const [det, setDet] = useState<Detail | null>(null);
@@ -89,7 +92,7 @@ export default function Atendimento() {
   const list = useMemo(() => {
     const n = q.trim().toLowerCase(), d = q.replace(/\D/g, "");
     return (ov?.conversations ?? []).filter((c) =>
-      (filter === "closed" ? c.status === "closed" : c.status === "open" && (filter === "open" || c.unread > 0))
+      (filter === "closed" ? c.status === "closed" : c.status === "open" && (filter === "open" || (filter === "human" ? !!c.needs_human : c.unread > 0)))
       && (!n || (c.name ?? "").toLowerCase().includes(n) || (d.length >= 3 && c.wa_id.includes(d))));
   }, [ov, filter, q]);
 
@@ -110,6 +113,11 @@ export default function Atendimento() {
   async function submitText(e: React.FormEvent) {
     e.preventDefault();
     if (await send(text)) setText("");
+  }
+  async function setAi(mode: "auto" | "pause" | "resolved") {
+    if (!det) return;
+    const { error } = await sb.rpc("ai_conversation_set", { p_conversation_id: det.conversation.id, p_mode: mode });
+    if (error) setErr(errorMessage(error)); else { await loadList(); await loadConv(det.conversation.id); }
   }
   async function setStatus(s: "open" | "closed") {
     if (!det) return;
@@ -138,6 +146,7 @@ export default function Atendimento() {
           Enquanto isso, use <b>Novo pedido</b> para lançar pedidos que chegam pelo WhatsApp da loja e envie a confirmação pelo próprio app.
         </Alert>
       )}
+      {canManage(role) && <AiAttendant onChanged={() => void loadList()} />}
       <Alert>{err}</Alert>
 
       <div className="grid min-h-[70vh] overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 lg:grid-cols-[300px_1fr_280px]">
@@ -146,7 +155,9 @@ export default function Atendimento() {
           <div className="space-y-2 border-b border-zinc-200 p-3">
             <input className="input" placeholder="Buscar nome ou telefone" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar conversa" />
             <div className="flex gap-1 text-xs" role="tablist">
-              {([["open", "Abertas"], ["unread", `Não lidas${ov?.unread ? ` (${ov.unread})` : ""}`], ["closed", "Encerradas"]] as const).map(([k, l]) => (
+              {([["open", "Abertas"], ["unread", `Não lidas${ov?.unread ? ` (${ov.unread})` : ""}`],
+                ...(ov?.ai_enabled || ov?.needs_human ? [["human", `Atendente${ov?.needs_human ? ` (${ov.needs_human})` : ""}`] as const] : []),
+                ["closed", "Encerradas"]] as const).map(([k, l]) => (
                 <button key={k} role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}
                   className={`rounded-lg px-2.5 py-1 font-medium ${filter === k ? "bg-brand-600 text-white" : "bg-zinc-100 text-zinc-700"}`}>{l}</button>
               ))}
@@ -163,7 +174,7 @@ export default function Atendimento() {
                       <span className="shrink-0 text-[11px] text-zinc-500">{when(x.last_message_at)}</span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs text-zinc-500">{x.last_preview}</span>
+                      <span className="truncate text-xs text-zinc-500">{x.needs_human && <span className="mr-1 rounded bg-amber-100 px-1 font-semibold text-amber-800">Precisa de atendente</span>}{x.last_preview}</span>
                       {x.unread > 0 && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-emerald-600 px-1 text-[11px] font-bold text-white">{x.unread}</span>}
                     </span>
                   </span>
@@ -191,10 +202,30 @@ export default function Atendimento() {
                   ? <button className="btn-ghost px-2 text-xs" onClick={() => setStatus("closed")}>Encerrar</button>
                   : <button className="btn-ghost px-2 text-xs" onClick={() => setStatus("open")}>Reabrir</button>}
               </header>
+              {ov?.ai_enabled && c.status === "open" && (
+                c.needs_human ? (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                    <span className="flex-1"><b>A IA passou para a equipe.</b> {c.ai_handoff_reason ?? ""} Ela não responde esta conversa até alguém devolver.</span>
+                    <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setAi("resolved")}>Marcar como resolvido</button>
+                    <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setAi("auto")}>Devolver para a IA</button>
+                  </div>
+                ) : c.ai_paused_until ? (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-700">
+                    <span className="flex-1">IA pausada nesta conversa{new Date(c.ai_paused_until).getFullYear() < 9999 ? ` até ${when(c.ai_paused_until)} ${time(c.ai_paused_until)}` : ""}: a equipe está atendendo.</span>
+                    <button className="btn-secondary px-2 py-1 text-xs" onClick={() => setAi("auto")}>Devolver para a IA</button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 bg-sky-50 px-4 py-2 text-xs text-sky-900">
+                    <span className="flex-1">A IA está respondendo esta conversa. Se você responder, ela sai por 12 horas.</span>
+                    <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setAi("pause")}>Pausar IA</button>
+                  </div>
+                )
+              )}
               <div className="flex-1 space-y-2 overflow-y-auto bg-[#f4efe8] p-4" aria-live="polite">
                 {det.messages.map((m) => (
                   <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm shadow-sm ${m.direction === "out" ? "rounded-br-md bg-emerald-100" : "rounded-bl-md bg-white"}`}>
+                    <div className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm shadow-sm ${m.direction === "out" ? (m.by_ai ? "rounded-br-md bg-sky-100" : "rounded-br-md bg-emerald-100") : "rounded-bl-md bg-white"}`}>
+                      {m.by_ai && <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wide text-sky-700">IA</span>}
                       {m.body ?? <span className="italic text-zinc-500">{KIND_LABEL[m.kind] ?? "Mensagem"} (veja no celular)</span>}
                       <span className="mt-0.5 flex justify-end gap-1 text-[10px] text-zinc-500">{time(m.created_at)} <Ticks m={m} /></span>
                     </div>
