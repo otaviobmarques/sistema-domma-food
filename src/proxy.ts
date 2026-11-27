@@ -36,7 +36,7 @@ async function customDomain(request: NextRequest, host: string) {
   const path = request.nextUrl.pathname;
   const slug = await slugForHost(host);
   if (!slug) return NextResponse.redirect(MAIN_URL, 307);
-  if (/^\/(painel|admin|login|onboarding|auth)(\/|$)/.test(path)) return NextResponse.redirect(MAIN_URL + path + request.nextUrl.search, 307);
+  if (/^\/(painel|admin|login|onboarding|auth|revenda|r)(\/|$)/.test(path)) return NextResponse.redirect(MAIN_URL + path + request.nextUrl.search, 307);
   if (/^\/(pedido|mesa|entregador|api)(\/|$)/.test(path)) return NextResponse.next();
   const m = path.match(/^\/loja\/([^/]+)(\/.*)?$/);
   if (m) {

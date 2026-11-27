@@ -8,6 +8,7 @@ import { brl } from "@/lib/format";
 import { BillingSettings, type BillingAdmin } from "./billing";
 import { IfoodAppSettings } from "./ifood";
 import { DomainsSettings } from "./domains";
+import { ResellersAdmin } from "./resellers";
 
 type Tenant = {
   id: string; name: string; cnpj: string | null; plan_id: string; status: string; trial_ends_at: string; created_at: string;
@@ -89,6 +90,7 @@ export default function AdminPage() {
         {bill && <BillingSettings s={bill} onChanged={load} />}
         <IfoodAppSettings />
         <DomainsSettings />
+        {d && <ResellersAdmin tenants={d.tenants.map((t) => ({ id: t.id, name: t.name }))} />}
         <section className="card">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">Empresas</h2>

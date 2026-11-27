@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { Alert, Field } from "@/components/ui";
@@ -14,15 +14,31 @@ export default function Onboarding() {
   const [touched, setTouched] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // indicação de revenda (link /r/<código>)
+  const [ref, setRef] = useState<{ code: string; name: string } | null>(null);
+  useEffect(() => {
+    const code = document.cookie.split("; ").find((c) => c.startsWith("df_ref="))?.slice(7);
+    if (!code) return;
+    void (async () => {
+      const { data } = await supabaseBrowser().rpc("reseller_public", { p_code: decodeURIComponent(code) });
+      if (data) setRef(data as { code: string; name: string });
+    })();
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(""); setBusy(true);
-    const { error } = await supabaseBrowser().rpc("create_tenant", {
+    const sb = supabaseBrowser();
+    const { data, error } = await sb.rpc("create_tenant", {
       p_company: company || store, p_unit_name: store, p_slug: slug, p_seed: true,
     });
+    if (error) { setBusy(false); setErr(error.message.includes("slug") ? "Endereço inválido ou reservado." : error.message); return; }
+    if (ref) {
+      // liga a loja à revenda que indicou; se falhar, a loja segue criada normalmente
+      await sb.rpc("reseller_claim", { p_tenant_id: (data as { tenant_id: string }).tenant_id, p_code: ref.code });
+      document.cookie = "df_ref=; path=/; max-age=0";
+    }
     setBusy(false);
-    if (error) { setErr(error.message.includes("slug") ? "Endereço inválido ou reservado." : error.message); return; }
     router.replace("/painel");
     router.refresh();
   }
@@ -35,6 +51,7 @@ export default function Onboarding() {
           <h1 className="mt-1 text-3xl font-black tracking-tight">Vamos criar sua loja</h1>
           <p className="mt-1 text-sm text-zinc-500">Leva menos de um minuto. Tudo pode ser alterado depois.</p>
         </div>
+        {ref && <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-800">Indicação de <b>{ref.name}</b>.</p>}
         <Field label="Nome da loja">
           <input className="input" required minLength={2} maxLength={120} value={store} placeholder="Bella Massa Pizzaria"
             onChange={(e) => { setStore(e.target.value); if (!touched) setSlug(slugify(e.target.value)); }} />
