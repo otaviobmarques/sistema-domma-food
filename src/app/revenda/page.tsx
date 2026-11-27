@@ -78,9 +78,10 @@ export default function ResellerPortal() {
 
   const url = d ? referralUrl(d.reseller.code) : "";
   const kpis = d ? [
-    ["Clientes", String(d.totals.clients)], ["Ativos (pagantes)", String(d.totals.active)], ["Em teste", String(d.totals.trial)],
+    ["Clientes", String(d.totals.clients)], ["Ativos", String(d.totals.active)], ["Em teste", String(d.totals.trial)],
     ["Inadimplentes ou suspensos", String(d.totals.past_due + d.totals.suspended)],
-    ["Mensalidades ativas", brl(d.totals.mrr_cents)], ["Comissão a receber", brl(d.balance_cents)],
+    ["Mensalidades ativas", brl(d.totals.mrr_cents)],
+    d.balance_cents < 0 ? ["Repasse adiantado", brl(-d.balance_cents)] : ["Comissão a receber", brl(d.balance_cents)],
   ] : [];
 
   return (
@@ -170,7 +171,7 @@ export default function ResellerPortal() {
                     <tbody className="divide-y divide-zinc-100">
                       {d.months.map((m) => (
                         <tr key={m.month} className={m.received_cents || m.paid_cents ? "" : "text-zinc-400"}>
-                          <td className="p-2 capitalize">{monthLabel(m.month)}</td>
+                          <td className="p-2">{monthLabel(m.month)}</td>
                           <td className="p-2 text-right tabular-nums">{brl(m.received_cents)}</td>
                           <td className="p-2 text-right font-semibold tabular-nums">{brl(m.commission_cents)}</td>
                           <td className="p-2 text-right tabular-nums">{brl(m.paid_cents)}</td>
@@ -181,7 +182,7 @@ export default function ResellerPortal() {
                 </div>
                 <p className="mt-3 flex justify-between border-t border-zinc-200 pt-2 text-sm">
                   <span>Total de comissões {brl(d.commission_total_cents)} · repassado {brl(d.paid_total_cents)}</span>
-                  <b>Saldo {brl(d.balance_cents)}</b>
+                  <b>{d.balance_cents < 0 ? `Adiantado ${brl(-d.balance_cents)}` : `Saldo ${brl(d.balance_cents)}`}</b>
                 </p>
               </section>
 
@@ -191,7 +192,7 @@ export default function ResellerPortal() {
                   <ul className="divide-y divide-zinc-100 text-sm">
                     {d.payouts.map((p) => (
                       <li key={p.id} className="flex justify-between gap-2 py-2">
-                        <span><span className="capitalize">{monthLabel(p.month)}</span>{p.note ? <span className="text-zinc-500"> · {p.note}</span> : null}
+                        <span><span>{monthLabel(p.month)}</span>{p.note ? <span className="text-zinc-500"> · {p.note}</span> : null}
                           <span className="block text-xs text-zinc-500">registrado em {dateBR(p.paid_at)}</span></span>
                         <b className="tabular-nums">{brl(p.amount_cents)}</b>
                       </li>

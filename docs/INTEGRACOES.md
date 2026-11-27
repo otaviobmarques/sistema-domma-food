@@ -422,3 +422,38 @@ Função `mcp` (Model Context Protocol, HTTP sem sessão). Usa a **mesma chave d
   - Se uma venda for recusada (por exemplo, desconto acima do limite de quem enviou), ela aparece com o motivo e é reenviada a cada 30 segundos.
   - Um gerente pode entrar e reenviar. O dono ou gerente também pode descartar a venda.
 - **Limites:** a fila fica no navegador daquele aparelho. Vendas com mais de 7 dias não são aceitas.
+
+## Portal de revendas
+
+- **Revendas** são parceiros comerciais que indicam lojas e recebem comissão sobre a mensalidade paga por elas.
+- **Admin › Revendas:**
+  - cria a revenda: nome, código do link, comissão em % (0 a 80) e e-mail do responsável;
+  - liga ou desliga lojas manualmente;
+  - registra os repasses pagos (mês de referência, valor e observação) e, se houver lançamento errado, apaga;
+  - desativa a revenda: o link para de ligar novas lojas, mas o portal continua acessível.
+- **Link de indicação** `/r/<código>`:
+  - guarda o código no navegador por 30 dias e leva ao cadastro;
+  - ao criar a loja, o cadastro mostra "Indicação de <revenda>" e liga a loja (`reseller_claim`).
+  - A indicação só vale:
+    - para quem é dono da loja;
+    - para lojas criadas nos últimos 30 dias;
+    - uma vez por loja;
+    - se a revenda não estiver indicando a própria loja.
+  - O lojista não consegue trocar nem tirar a revenda da loja; só o admin consegue.
+- **Portal** `/revenda`:
+  - link de indicação para copiar;
+  - números da carteira: clientes, ativos, em teste, inadimplentes e mensalidades ativas;
+  - lista de clientes: plano, situação, pedidos em 30 dias, último pagamento e e-mail do dono;
+  - comissões dos últimos 12 meses, repasses recebidos e saldo;
+  - equipe: o responsável convida e remove pessoas (até 20). A equipe vê clientes e comissões.
+  - O parceiro não entra no painel das lojas.
+  - Quem tem acesso a uma revenda e não tem loja própria cai direto no portal ao entrar.
+- **Comissão:**
+  - % sobre o valor líquido (depois das tarifas do Asaas) das faturas pagas, contadas a partir da data em que a loja foi ligada à revenda;
+  - agrupada pelo mês do pagamento;
+  - lojas isentas de cobrança não geram comissão;
+  - mudar a porcentagem recalcula todos os meses.
+- **Segurança:**
+  - as tabelas não são acessíveis diretamente; tudo passa pelas funções `reseller_*` e `admin_reseller_*`;
+  - cada alteração fica registrada na auditoria;
+  - quem tem 2FA ativo precisa da sessão com 2FA para acessar o portal.

@@ -94,7 +94,7 @@ function Reseller({ r, tenants, busy, run }: {
       <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3">
         <span className="font-semibold">{r.reseller.name} <span className="text-xs font-normal text-zinc-500">/r/{r.reseller.code} · {Number(r.reseller.commission_pct).toLocaleString("pt-BR")}%</span>
           {!r.reseller.active && <span className="badge ml-2 bg-zinc-200 text-zinc-700">Inativa</span>}</span>
-        <span className="text-sm text-zinc-600">{r.totals.clients} clientes · {r.totals.active} ativos · saldo <b>{brl(r.balance_cents)}</b></span>
+        <span className="text-sm text-zinc-600">{r.totals.clients} clientes · {r.totals.active} ativos · {r.balance_cents < 0 ? <>adiantado <b>{brl(-r.balance_cents)}</b></> : <>saldo <b>{brl(r.balance_cents)}</b></>}</span>
       </summary>
       <div className="space-y-4 border-t border-zinc-200 p-4 text-sm">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -153,7 +153,7 @@ function Reseller({ r, tenants, busy, run }: {
           <p className="mb-1 font-medium">Comissões dos últimos meses</p>
           <ul className="grid gap-1 sm:grid-cols-3">
             {r.months.slice(0, 6).map((m) => (
-              <li key={m.month} className="rounded-lg bg-zinc-50 px-2 py-1"><span className="capitalize">{monthLabel(m.month)}</span>: <b>{brl(m.commission_cents)}</b>
+              <li key={m.month} className="rounded-lg bg-zinc-50 px-2 py-1"><span>{monthLabel(m.month)}</span>: <b>{brl(m.commission_cents)}</b>
                 {m.paid_cents ? <span className="text-xs text-green-700"> · repassado {brl(m.paid_cents)}</span> : null}</li>
             ))}
           </ul>
@@ -174,7 +174,7 @@ function Reseller({ r, tenants, busy, run }: {
             <ul className="mt-2 divide-y divide-zinc-100">
               {r.payouts.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-2 py-1.5">
-                  <span><span className="capitalize">{monthLabel(p.month)}</span> · <b>{brl(p.amount_cents)}</b>{p.note ? ` · ${p.note}` : ""} <span className="text-xs text-zinc-500">({dateBR(p.paid_at)})</span></span>
+                  <span><span>{monthLabel(p.month)}</span> · <b>{brl(p.amount_cents)}</b>{p.note ? ` · ${p.note}` : ""} <span className="text-xs text-zinc-500">({dateBR(p.paid_at)})</span></span>
                   <button className="btn-ghost px-2 py-1 text-xs text-red-700" disabled={busy}
                     onClick={() => { if (confirm("Apagar este repasse? Use só para corrigir um lançamento errado.")) void run(() => sb.rpc("admin_reseller_payout_delete", { p_id: p.id }), "Repasse apagado."); }}>Apagar</button>
                 </li>

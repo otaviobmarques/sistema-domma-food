@@ -23,8 +23,10 @@ export const CLIENT_STATUS: Record<string, { l: string; c: string }> = {
   past_due: { l: "Inadimplente", c: "bg-orange-100 text-orange-800" }, suspended: { l: "Suspensa", c: "bg-red-100 text-red-800" },
 };
 
-export const monthLabel = (iso: string) =>
-  new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+export const monthLabel = (iso: string) => {
+  const t = new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 export const dateBR = (iso: string | null) => (iso ? new Date(iso.length === 10 ? iso + "T12:00:00" : iso).toLocaleDateString("pt-BR") : "—");
 export const referralUrl = (code: string) =>
   `${typeof window !== "undefined" ? window.location.origin : "https://domma-food.vercel.app"}/r/${code}`;
