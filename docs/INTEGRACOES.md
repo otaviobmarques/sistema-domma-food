@@ -457,3 +457,33 @@ Função `mcp` (Model Context Protocol, HTTP sem sessão). Usa a **mesma chave d
   - as tabelas não são acessíveis diretamente; tudo passa pelas funções `reseller_*` e `admin_reseller_*`;
   - cada alteração fica registrada na auditoria;
   - quem tem 2FA ativo precisa da sessão com 2FA para acessar o portal.
+
+## Atendente IA no WhatsApp (Claude)
+
+- **O que faz:** responde os clientes no WhatsApp oficial da loja sobre cardápio, preços, adicionais, horário, áreas e taxas de entrega, formas de pagamento e situação do pedido (com o link de acompanhamento).
+  - Para pedir, manda o link do cardápio. Não registra pedido nem recebe pagamento pela conversa.
+  - Passa para a equipe (`needs_human`) quando o cliente pede uma pessoa, em reclamação, problema com pedido, troca, reembolso ou cancelamento, alergia sem resposta no cardápio, encomenda grande, ou quando não entende a mensagem ou não tem a informação.
+  - Não inventa item, preço, taxa, prazo ou horário: usa só o cardápio, os horários e as áreas de entrega da loja (`get_store`) e as "instruções da loja".
+- **Chave da IA:**
+  - **Da plataforma:** Admin › Atendente IA. Salve a chave da API do Claude, teste e ligue. O limite padrão é de 300 respostas por mês por loja; dá para ajustar por loja.
+  - **Da própria loja:** Atendimento › Atendente IA › "Minha chave". Não tem limite, e o uso é cobrado na conta da loja na Anthropic.
+  - As chaves ficam no Vault e só o dono da conta (ou o admin, para a chave da plataforma) troca e testa.
+  - O teste consulta o modelo, sem gastar tokens. Uma chave recusada durante o uso fica marcada para o dono ver.
+- **Ligar:** precisa do WhatsApp oficial ligado (Marketing › WhatsApp) e de uma chave disponível. O painel tem "Testar o atendente", que conversa sem enviar nada no WhatsApp; o teste conta no limite.
+- **Na caixa de entrada:**
+  - Mensagens da IA aparecem marcadas "IA". Conversas passadas para a equipe ganham o selo "Precisa de atendente" e um filtro próprio.
+  - Quando alguém da equipe responde, a IA sai da conversa por 12 horas.
+  - Também dá para pausar a IA na conversa, marcar como resolvido ou devolver para a IA.
+- **Como funciona:**
+  1. Cada mensagem do cliente cria uma tarefa em `ai_jobs`. Ela espera 6 segundos para juntar mensagens seguidas, e o banco acorda a função `atendente/worker` (com o cron `domma-atendente` a cada minuto como reserva).
+  2. O worker monta o contexto (`ai_job_context`): loja, cardápio, pedidos dos últimos 30 dias deste número e as últimas 24 mensagens.
+  3. Chama o Claude (Claude Opus 5.5, esforço baixo, resposta em JSON com `reply`, `handoff` e `handoff_reason`, cache do bloco da loja, troca automática de modelo em caso de recusa).
+  4. A resposta é gravada (`ai_job_finish`) e enviada pela Meta pelo mesmo caminho da caixa de entrada.
+  - Falha temporária: tenta de novo em 30 segundos, até 3 vezes; depois a conversa passa para a equipe.
+  - Se a equipe assumir enquanto a IA pensa, a resposta não é enviada.
+  - O modelo pode ser trocado pela variável `AI_MODEL` da função.
+- **Uso e custo:** `ai_usage` guarda respostas e tokens por loja, mês e origem (plataforma ou própria). O admin vê o uso do mês por loja. Ao atingir o limite, a conversa vai para a equipe.
+- **Segurança:**
+  - As mensagens do cliente são tratadas como texto do cliente: pedidos para mudar regras, revelar instruções ou dar desconto são recusados.
+  - Os dados de contexto do sistema (hora, loja aberta, pedidos) vão separados e marcados.
+  - As tabelas novas não têm acesso direto, e as funções de serviço só rodam com a chave de serviço.
