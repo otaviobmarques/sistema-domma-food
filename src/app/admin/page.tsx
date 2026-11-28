@@ -10,6 +10,7 @@ import { IfoodAppSettings } from "./ifood";
 import { DomainsSettings } from "./domains";
 import { ResellersAdmin } from "./resellers";
 import { AiSettings } from "./ai";
+import { AppsAdmin } from "./apps";
 
 type Tenant = {
   id: string; name: string; cnpj: string | null; plan_id: string; status: string; trial_ends_at: string; created_at: string;
@@ -92,6 +93,7 @@ export default function AdminPage() {
         <IfoodAppSettings />
         <DomainsSettings />
         <AiSettings />
+        <AppsAdmin />
         {d && <ResellersAdmin tenants={d.tenants.map((t) => ({ id: t.id, name: t.name }))} />}
         <section className="card">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

@@ -2846,3 +2846,172 @@ do $$ begin
 end $$;
 reset role;
 select 'ATENDENTE IA OK' as resultado;
+
+-- =====================================================================
+-- APP STORE (integrações da plataforma + apps de parceiros)
+-- =====================================================================
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare r jsonb; begin
+  r := public.admin_app_save('{"slug":"estoque-facil","name":"Estoque Fácil","developer":"Parceiro Ltda","tagline":"Controle de estoque integrado aos pedidos",
+    "category":"gestao","scopes":["orders:read","menu:read"],"install_url":"https://parceiro.example.com/domma/install",
+    "config_url":"https://parceiro.example.com/app","webhook_url":"https://parceiro.example.com/domma/webhook","webhook_events":["order.created"]}');
+  if r->>'secret' not like 'appsec_%' then raise exception 'FALHA segredo do app %', r; end if;
+  perform set_config('test.app', r->>'id', false);
+  begin perform public.admin_app_save('{"slug":"app-http","name":"X","developer":"Y Z","tagline":"Teste de app","scopes":["menu:read"],"install_url":"http://parceiro.example.com/i"}');
+    raise exception 'FALHA aceitou http'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_app_save('{"slug":"app-local","name":"X","developer":"Y Z","tagline":"Teste de app","scopes":["menu:read"],"install_url":"https://localhost/i"}');
+    raise exception 'FALHA aceitou localhost'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_app_save('{"slug":"app-esc","name":"X","developer":"Y Z","tagline":"Teste de app","scopes":["admin:all"],"install_url":"https://p.example.com/i"}');
+    raise exception 'FALHA permissão inexistente'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_app_save(jsonb_build_object('id', r->>'id', 'webhook_url', null));
+    raise exception 'FALHA eventos sem webhook'; exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  perform public.admin_builtin_save('ifood', '{"enabled":false}');
+  perform public.admin_builtin_save('nfce', '{"featured":true,"plans":["completo"]}');
+end $$;
+-- rascunho não aparece para a loja
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare r jsonb; begin
+  r := public.appstore_overview(current_setting('test.a_tenant')::uuid);
+  if exists (select 1 from jsonb_array_elements(r->'apps') a where a->>'slug' = 'estoque-facil') then raise exception 'FALHA rascunho visível'; end if;
+  if (r->'builtin'->'ifood'->>'enabled')::boolean or not (r->'builtin'->'nfce'->>'featured')::boolean or r->'connected' ? 'whatsapp' is not true then
+    raise exception 'FALHA overview integrações %', r - 'apps'; end if;
+  begin perform public.app_install(current_setting('test.app')::uuid, current_setting('test.a_tenant')::uuid); raise exception 'FALHA instalou rascunho';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  begin perform public.admin_app_save('{"status":"published"}'); raise exception 'FALHA dono no admin';
+  exception when insufficient_privilege then null; end;
+end $$;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+select public.admin_app_save(jsonb_build_object('id', current_setting('test.app'), 'status', 'published')) is not null;
+-- caixa vê nada e não instala
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$ begin
+  begin perform public.app_install(current_setting('test.app')::uuid, current_setting('test.a_tenant')::uuid); raise exception 'FALHA caixa instalou';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- dono instala: chave só com as permissões do app, webhook do app, fora da área de API da loja
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare t uuid := current_setting('test.a_tenant')::uuid; r jsonb; i public.app_installations; k public.api_keys; begin
+  r := public.app_install(current_setting('test.app')::uuid, t);
+  if r->>'status' <> 'pending' then raise exception 'FALHA instalar %', r; end if;
+  perform set_config('test.inst', r->>'id', false);
+  begin perform public.app_install(current_setting('test.app')::uuid, t); raise exception 'FALHA instalou duas vezes';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  r := public.appstore_overview(t);
+  if (select a->'installation'->>'status' from jsonb_array_elements(r->'apps') a where a->>'slug' = 'estoque-facil') <> 'pending' then raise exception 'FALHA situação pendente'; end if;
+  r := public.api_overview(t);
+  if exists (select 1 from jsonb_array_elements(r->'keys') x where x->>'name' like 'App:%') or exists (select 1 from jsonb_array_elements(r->'webhooks') x where x->>'url' like '%parceiro.example.com%') then
+    raise exception 'FALHA recurso do app na área de API'; end if;
+end $$;
+reset role;
+do $$ declare i public.app_installations := (select x from public.app_installations x where id = current_setting('test.inst')::uuid); begin
+  if (select scopes from public.api_keys where id = i.api_key_id) <> array['menu:read','orders:read'] and (select scopes from public.api_keys where id = i.api_key_id) <> array['orders:read','menu:read'] then
+    raise exception 'FALHA permissões da chave'; end if;
+  if (select events from public.webhook_endpoints where id = i.webhook_endpoint_id) <> array['order.created'] then raise exception 'FALHA webhook do app'; end if;
+  perform set_config('test.appkey', i.api_key_id::text, false);
+  perform set_config('test.appwh', i.webhook_endpoint_id::text, false);
+end $$;
+set role authenticated;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ begin
+  begin perform public.api_key_revoke(current_setting('test.appkey')::uuid); raise exception 'FALHA revogou chave do app pela API';
+  exception when insufficient_privilege then null; end;
+  begin perform public.webhook_delete(current_setting('test.appwh')::uuid); raise exception 'FALHA apagou webhook do app';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- entrega do aviso ao parceiro (worker)
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; a jsonb; begin
+  j := public.app_event_jobs(10);
+  if jsonb_array_length(j) <> 1 then raise exception 'FALHA jobs %', j; end if;
+  a := j->0;
+  if a->>'url' <> 'https://parceiro.example.com/domma/install' or a->>'secret' not like 'appsec_%' or a->'payload'->>'event' <> 'app.installed'
+     or a->'payload'->>'api_key' !~ '^dmf_[a-f0-9]{48}$' or a->'payload'->'webhook'->>'secret' not like 'whsec_%'
+     or a->'payload'->'account'->>'id' <> current_setting('test.a_tenant') or jsonb_array_length(a->'payload'->'stores') < 1 then
+    raise exception 'FALHA payload %', a->'payload' - 'api_key'; end if;
+  -- a chave entregue funciona na API pública
+  if public.api_auth(encode(extensions.digest(a->'payload'->>'api_key', 'sha256'), 'hex'))->>'tenant_id' <> current_setting('test.a_tenant') then raise exception 'FALHA chave do app'; end if;
+  perform set_config('test.appkeysec', (select key_secret_id::text from public.app_events where id = (a->>'id')::bigint), false);
+  perform public.app_event_result((a->>'id')::bigint, true, 200, null);
+  if (select status from public.app_installations where id = current_setting('test.inst')::uuid) <> 'active' then raise exception 'FALHA ativar'; end if;
+  if (select key_secret_id from public.app_events where id = (a->>'id')::bigint) is not null then raise exception 'FALHA referência da chave'; end if;
+end $$;
+reset role;
+do $$ begin
+  if exists (select 1 from vault.secrets where id = current_setting('test.appkeysec')::uuid) then raise exception 'FALHA chave ficou no Vault'; end if;
+end $$;
+-- desinstalar: revoga tudo e avisa o parceiro
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select public.app_uninstall(current_setting('test.inst')::uuid);
+reset role;
+do $$ begin
+  if (select revoked_at from public.api_keys where id = current_setting('test.appkey')::uuid) is null then raise exception 'FALHA chave não revogada'; end if;
+  if exists (select 1 from public.webhook_endpoints where id = current_setting('test.appwh')::uuid) then raise exception 'FALHA webhook não apagado'; end if;
+  if (select status from public.app_installations where id = current_setting('test.inst')::uuid) <> 'uninstalled' then raise exception 'FALHA situação desinstalado'; end if;
+  if not exists (select 1 from public.app_events where installation_id = current_setting('test.inst')::uuid and event = 'app.uninstalled' and status = 'queued' and payload->>'api_key' is null) then
+    raise exception 'FALHA aviso de desinstalação'; end if;
+end $$;
+-- parceiro não confirma: depois das tentativas, a instalação falha e a chave é revogada
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+select set_config('test.inst2', (public.app_install(current_setting('test.app')::uuid, current_setting('test.a_tenant')::uuid))->>'id', false);
+reset role;
+set role service_role;
+set request.jwt.claims = '{"role":"service_role"}';
+do $$ declare j jsonb; x jsonb; n int := 0; begin
+  for n in 1..4 loop
+    update public.app_events set next_attempt_at = now() - interval '1 second' where installation_id = current_setting('test.inst2')::uuid and status = 'queued';
+    j := public.app_event_jobs(10);
+    for x in select * from jsonb_array_elements(j) loop
+      if x->'payload'->>'installation_id' = current_setting('test.inst2') then perform public.app_event_result((x->>'id')::bigint, false, 500, 'erro do parceiro');
+      else perform public.app_event_result((x->>'id')::bigint, true, 200, null); end if;
+    end loop;
+  end loop;
+  if (select status from public.app_installations where id = current_setting('test.inst2')::uuid) <> 'failed' then raise exception 'FALHA instalação sem confirmação'; end if;
+  if (select k.revoked_at from public.api_keys k join public.app_installations i on i.api_key_id = k.id where i.id = current_setting('test.inst2')::uuid) is null then
+    raise exception 'FALHA chave de instalação falha'; end if;
+  if exists (select 1 from public.app_events where installation_id = current_setting('test.inst2')::uuid and key_secret_id is not null) then raise exception 'FALHA chave no Vault após falha'; end if;
+end $$;
+-- app fora do plano e suspensão pela plataforma
+reset role;
+set role authenticated;
+set request.jwt.claims = '{"aal":"aal2"}';
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare r jsonb; begin
+  r := public.admin_app_save(jsonb_build_object('slug','so-completo','name','Só Completo','developer','Parceiro Ltda','tagline','App só para outro plano',
+    'scopes', jsonb_build_array('menu:read'),'install_url','https://parceiro.example.com/i2','status','published',
+    'plans', jsonb_build_array((select id from public.plans where id <> (select plan_id from public.tenants where id = current_setting('test.a_tenant')::uuid) limit 1))));
+  perform set_config('test.app2', r->>'id', false);
+end $$;
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+do $$ declare r jsonb; begin
+  begin perform public.app_install(current_setting('test.app2')::uuid, current_setting('test.a_tenant')::uuid); raise exception 'FALHA instalou fora do plano';
+  exception when others then if sqlerrm like 'FALHA%' then raise; end if; end;
+  if (select (a->>'in_plan')::boolean from jsonb_array_elements(public.appstore_overview(current_setting('test.a_tenant')::uuid)->'apps') a where a->>'slug' = 'so-completo') then
+    raise exception 'FALHA in_plan'; end if;
+  perform set_config('test.inst3', (public.app_install(current_setting('test.app')::uuid, current_setting('test.a_tenant')::uuid))->>'id', false);
+end $$;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$ declare r jsonb; begin
+  if public.admin_app_suspend(current_setting('test.app')::uuid) <> 1 then raise exception 'FALHA suspender'; end if;
+  r := public.admin_appstore();
+  if (select (a->>'installs')::int from jsonb_array_elements(r->'apps') a where a->>'slug' = 'estoque-facil') <> 0 then raise exception 'FALHA contagem após suspender'; end if;
+end $$;
+reset role;
+do $$ begin
+  if (select status from public.app_installations where id = current_setting('test.inst3')::uuid) <> 'uninstalled' then raise exception 'FALHA instalação após suspender'; end if;
+end $$;
+set role anon;
+do $$ begin
+  begin perform public.appstore_overview(current_setting('test.a_tenant')::uuid); raise exception 'FALHA anon appstore';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select 'APP STORE OK' as resultado;

@@ -161,6 +161,38 @@ function verify(rawBody, header, secret) {
 }`}</Code>
         </section>
 
+        <section id="apps" className="space-y-3">
+          <h2 className="text-xl font-extrabold">Apps para a App Store</h2>
+          <p className="text-sm text-zinc-700">
+            Parceiros podem publicar apps na App Store do painel. O restaurante instala com um clique, vê as permissões que o app pede e pode desinstalar quando quiser.
+            Para cadastrar um app, fale com a equipe da plataforma: ela revisa, publica e envia o <strong>segredo de assinatura</strong> do app (<code>appsec_…</code>).
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-zinc-700">
+            <li><strong>Instalação</strong>: enviamos um <code>POST</code> para o endereço de instalação do app com o evento <code>app.installed</code>.
+              Responda <code>2xx</code> em até 10 segundos para confirmar. Sem confirmação, tentamos de novo em 1, 5 e 30 minutos; depois disso a instalação falha e a chave é revogada.</li>
+            <li>O corpo traz <code>installation_id</code>, a conta, a loja (ou a lista de lojas), as permissões, a <code>api_key</code> (<code>dmf_…</code>, só com as permissões do app),
+              o <code>api_base</code> e, se o app pediu eventos de pedido, o <code>webhook</code> com o segredo <code>whsec_…</code>. A chave vai só nesta mensagem: guarde com segurança.</li>
+            <li><strong>Desinstalação</strong>: evento <code>app.uninstalled</code> com o <code>installation_id</code>. A chave já estará revogada.</li>
+            <li><strong>Assinatura</strong>: cabeçalho <code>Domma-Signature: t=&lt;unix&gt;,v1=&lt;hex&gt;</code>, um HMAC-SHA256 com o segredo do app sobre <code>&quot;t.corpo&quot;</code>,
+              igual aos webhooks. Recuse mensagens com assinatura inválida ou com mais de 5 minutos. O cabeçalho <code>Domma-Event</code> traz o evento.</li>
+            <li><strong>Página do app</strong> (opcional): depois de instalado, o botão &quot;Abrir o app&quot; leva o restaurante ao seu endereço com <code>?installation=…</code>.</li>
+          </ul>
+          <Code>{`{
+  "event": "app.installed",
+  "installation_id": "5f0c…",
+  "app": "seu-app",
+  "account": { "id": "…", "name": "Pizzaria Exemplo" },
+  "store": null,
+  "stores": [{ "id": "…", "name": "Pizzaria Exemplo", "slug": "pizzaria-exemplo", "menu_url": "https://…" }],
+  "scopes": ["orders:read", "menu:read"],
+  "api_key": "dmf_…",
+  "api_base": "${BASE}",
+  "webhook": { "url": "https://seu-app.com/domma/webhook", "events": ["order.created"], "secret": "whsec_…" },
+  "installed_at": "2026-11-28T12:00:00Z",
+  "delivery_id": 123
+}`}</Code>
+        </section>
+
         <p className="border-t border-zinc-200 pt-6 text-xs text-zinc-500">Dúvidas sobre a integração? Fale com o suporte do Domma Food pelo painel.</p>
       </main>
     </div>
