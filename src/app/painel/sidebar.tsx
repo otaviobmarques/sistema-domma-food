@@ -36,6 +36,7 @@ const ICONS: Record<string, React.ReactNode> = {
   chat: <><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4v-4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" /><path d="M8 10h8M8 13h5" /></>,
   network: <><circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="18" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M12 7.5v4M12 11.5l-5.5 4.5M12 11.5l5.5 4.5" /></>,
   totem: <><rect x="6" y="2.5" width="12" height="15" rx="2" /><path d="M9 21.5h6M12 17.5v4M9 7h6M9 10.5h4" /></>,
+  apps: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M17.5 14v7M14 17.5h7" /></>,
   logout: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4" />,
 };
 
@@ -67,6 +68,7 @@ const NAV: { href: string; label: string; icon: string; manage?: boolean; cashie
   { href: "/painel/marketing", label: "Marketing", icon: "megaphone", manage: true },
   { href: "/painel/fidelidade", label: "Fidelidade", icon: "heart", manage: true },
   { href: "/painel/avaliacoes", label: "Avaliações", icon: "star", manage: true },
+  { href: "/painel/apps", label: "App Store", icon: "apps", manage: true },
   { href: "/painel/integracoes", label: "Integrações", icon: "plug", manage: true },
   { href: "/painel/clientes", label: "Clientes", icon: "customers", manage: true },
   { href: "/painel/equipe", label: "Equipe", icon: "team", manage: true, section: "Conta" },

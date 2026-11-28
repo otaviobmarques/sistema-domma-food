@@ -487,3 +487,27 @@ Função `mcp` (Model Context Protocol, HTTP sem sessão). Usa a **mesma chave d
   - As mensagens do cliente são tratadas como texto do cliente: pedidos para mudar regras, revelar instruções ou dar desconto são recusados.
   - Os dados de contexto do sistema (hora, loja aberta, pedidos) vão separados e marcados.
   - As tabelas novas não têm acesso direto, e as funções de serviço só rodam com a chave de serviço.
+
+## App Store
+
+- **Painel › App Store** (dono e gerência):
+  - mostra as integrações da plataforma e os apps de parceiros, com busca e categorias;
+  - cada integração aparece como "Conectado" (`appstore_builtin_status`) e tem o link para configurar;
+  - o catálogo das integrações fica em `src/lib/appstore.ts`.
+- **Admin › App Store:**
+  - **Integrações da plataforma:** mostrar ou esconder, destacar e limitar a planos (`appstore_builtin`). Aqui o plano só muda a vitrine: o cartão mostra "disponível nos planos…".
+  - **Apps de parceiros:** cadastrar (nome, desenvolvedor, resumo, permissões, endereço de instalação, página do app, webhook de pedidos, planos, preço em texto).
+    - Ao criar, gera o segredo de assinatura `appsec_…`. Ele aparece uma vez; dá para gerar outro.
+    - O app nasce como rascunho e só aparece para as lojas depois de **Publicar**: essa é a revisão.
+    - **Suspender** desfaz todas as instalações e revoga as chaves.
+- **Instalação** (só o dono da conta, `app_install`):
+  1. A loja vê as permissões e escolhe "todas as lojas" ou uma loja.
+  2. O sistema cria uma chave da API (`api_keys.app_installation_id`) só com as permissões do app e, se o app pediu eventos, um webhook de pedidos.
+  3. A função `apps/worker` envia `app.installed` ao endereço de instalação. A mensagem leva a chave e o segredo do webhook e é assinada com `Domma-Signature`, como os webhooks.
+     - O parceiro confirma com `2xx`. Sem confirmação, há novas tentativas em 1, 5 e 30 minutos; depois a instalação falha e a chave é revogada.
+     - A chave fica no Vault só até ser entregue.
+  - O plano do app é exigido na instalação.
+- **Desinstalação** (`app_uninstall`): revoga a chave, apaga o webhook e envia `app.uninstalled`.
+  - Chaves e webhooks de apps não aparecem na área de API da loja e não contam no limite dela.
+  - Também não podem ser revogados ou alterados por lá: a desinstalação é pela App Store.
+- **Para desenvolvedores:** `/desenvolvedores#apps` (formato da mensagem, assinatura, tentativas).
